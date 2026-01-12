@@ -1,0 +1,6 @@
+"""Geometry conventions and utilities."""
+
+
+
+
+

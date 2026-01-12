@@ -1,0 +1,73 @@
+.profile-builder {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background-color: #1a1a1a;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.profile-builder-header {
+  padding: 1rem;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-builder-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.mode-selector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.mode-selector button {
+  padding: 0.5rem 1rem;
+  background-color: #3a3a3a;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.mode-selector button:hover:not(:disabled) {
+  background-color: #4a4a4a;
+  color: #fff;
+}
+
+.mode-selector button.active {
+  background-color: #646cff;
+  color: #fff;
+  border-color: #646cff;
+}
+
+.mode-selector button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.profile-builder-content {
+  flex: 1;
+  overflow: visible;
+}
+
+.sketch-placeholder {
+  padding: 3rem;
+  text-align: center;
+  color: #888;
+}
+
+.sketch-placeholder .hint {
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+

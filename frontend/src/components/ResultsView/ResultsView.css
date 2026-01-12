@@ -1,0 +1,169 @@
+.results-view {
+  padding: 1rem;
+  overflow: visible;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.results-header h2 {
+  margin: 0;
+  color: #fff;
+}
+
+.overall-confidence-badge {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.overall-confidence-badge.confidence-high {
+  background-color: #4caf50;
+  color: white;
+}
+
+.overall-confidence-badge.confidence-medium {
+  background-color: #ff9800;
+  color: white;
+}
+
+.overall-confidence-badge.confidence-low {
+  background-color: #f44336;
+  color: white;
+}
+
+.mode-switch-section {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.switch-mode-btn {
+  padding: 0.5rem 1rem;
+  background-color: #42a5f5;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.switch-mode-btn:hover {
+  background-color: #1e88e5;
+}
+
+.results-warnings {
+  padding: 1rem;
+  background-color: #3a2a1a;
+  border: 1px solid #ffa726;
+  border-radius: 4px;
+}
+
+.results-warnings h3 {
+  margin-top: 0;
+  color: #ffa726;
+}
+
+.results-warnings ul {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.5rem;
+  color: #ffa726;
+}
+
+.results-warnings li {
+  margin: 0.25rem 0;
+}
+
+.downloads-section {
+  padding: 1rem;
+  background-color: #1e1e1e;
+  border-radius: 8px;
+  border: 1px solid #444;
+}
+
+.downloads-section h3 {
+  margin-top: 0;
+  color: #fff;
+}
+
+.download-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.download-link {
+  padding: 0.5rem 1rem;
+  background-color: #42a5f5;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.download-link:hover {
+  background-color: #1e88e5;
+}
+
+.download-link.step-download {
+  background-color: #4caf50;
+  font-weight: 600;
+}
+
+.download-link.step-download:hover {
+  background-color: #388e3c;
+}
+
+.download-link.disabled {
+  background-color: #555;
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.download-link.disabled:hover {
+  background-color: #555;
+}
+
+.download-hint {
+  margin-top: 0.75rem;
+  color: #aaa;
+  font-size: 0.85rem;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.loading,
+.error {
+  padding: 2rem;
+  text-align: center;
+  color: #888;
+}
+
+.error {
+  color: #ff6b6b;
+}
+
+.error-hint {
+  margin-top: 0.5rem;
+  color: #888;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+

@@ -1,0 +1,254 @@
+"""Job management endpoints."""
+
+import json
+from typing import List, Optional
+from datetime import datetime
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
+
+from app.models.job import JobResponse, JobModeRequest
+from app.services.job_service import JobService
+from app.services.run_report_service import RunReportService
+from app.storage.file_storage import FileStorage
+from app.utils.outputs_helper import build_outputs_info
+
+router = APIRouter()
+
+job_service = JobService()
+file_storage = FileStorage()
+run_report_service = RunReportService()
+
+
+@router.post("", response_model=JobResponse, status_code=201)
+async def create_job(
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    mode: Optional[str] = Form(None),
+    files: Optional[List[UploadFile]] = File(None),
+):
+    """Create a new job and upload files.
+
+    Accepts multipart/form-data with:
+    - files: Optional list of PDF or ZIP files (can be omitted)
+    - name: Optional job name
+    - description: Optional job description
+    - mode: Optional job mode (assisted_manual or auto_convert)
+
+    Files are optional - job can be created without files for later upload.
+    Returns job with status CREATED and list of input files.
+    """
+    try:
+        job_id = job_service.create_job(name, description, mode)
+
+        if files and len(files) > 0:
+            job = job_service.upload_files(job_id, files)
+        else:
+            job = job_service.get_job(job_id)
+
+        return job
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        import traceback
+
+        error_detail = f"Error creating job: {str(e)}\n{traceback.format_exc()}"
+        print(f"ERROR: {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+@router.get("", response_model=List[JobResponse])
+async def list_jobs():
+    """List all jobs."""
+    return job_service.list_jobs()
+
+
+@router.get("/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str):
+    """Get job details with run report summary and outputs info."""
+    job = job_service.get_job(job_id)
+
+    report_summary = run_report_service.get_report_summary(job_id)
+    job.run_report = report_summary.dict() if report_summary.has_report else None
+
+    outputs_info = build_outputs_info(job_id)
+    job.outputs_info = outputs_info
+
+    return job
+
+
+@router.get("/{job_id}/files")
+async def list_job_files(job_id: str):
+    """
+    List ALL files for a job with download URLs.
+
+    ✅ Fix: Do NOT rely on job.input_files / job.output_files, because those
+    lists often don't include newly generated outputs in nested folders like:
+    - outputs/pdf_pages/page_0.png
+    - outputs/pdf_views/page_0_views.json
+    """
+    _ = job_service.get_job(job_id)  # verify job exists
+
+    files = []
+
+    # Use storage scan (recursive) so frontend sees pdf_pages + pdf_views
+    input_paths = file_storage.list_input_files(job_id)
+    output_paths = file_storage.list_output_files(job_id)
+
+    for rel_path in input_paths + output_paths:
+        try:
+            _, filename, size = file_storage.get_file_info(job_id, rel_path)
+            files.append(
+                {
+                    "path": rel_path,
+                    "name": filename,
+                    "size": size,
+                    "url": f"/api/v1/jobs/{job_id}/download?path={rel_path}",
+                }
+            )
+        except HTTPException:
+            continue
+
+    return {"job_id": job_id, "files": files}
+
+
+@router.get("/{job_id}/download")
+async def download_file(job_id: str, path: str):
+    """Download a file from a job.
+
+    Safe download with path traversal protection.
+
+    ✅ Fix: allow frontend to fetch rendered images and view JSON from:
+    - outputs/pdf_pages/*.png
+    - outputs/pdf_views/*.json
+    plus key JSON artifacts used by auto pipeline.
+    """
+    # Verify job exists
+    try:
+        _ = job_service.get_job(job_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # ---- Output whitelist rules ----
+    # 1) Always allow inputs/*
+    if path.startswith("inputs/"):
+        pass
+
+    # 2) Allow specific outputs and subfolders needed by UI + pipeline
+    elif path.startswith("outputs/"):
+        filename = path.split("/")[-1]
+
+        # Allow rendered PDF pages (images)
+        if path.startswith("outputs/pdf_pages/") and (
+            filename.lower().endswith(".png")
+            or filename.lower().endswith(".jpg")
+            or filename.lower().endswith(".jpeg")
+        ):
+            pass
+
+        # Allow detected view JSON
+        elif path.startswith("outputs/pdf_views/") and filename.lower().endswith(".json"):
+            pass
+
+        # Allow known pipeline artifacts (extend as needed)
+        else:
+            allowed_output_files = {
+                "part_summary.json",
+                "model.step",
+                "model.glb",
+                "scale_report.json",
+                "inferred_stack.json",
+                "turned_stack.json",
+                "run_report.json",
+                "auto_detect_results.json",
+                "selected_view.json",
+                "step_approval.json",
+            }
+
+            if filename not in allowed_output_files:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"File '{filename}' is not allowed for download.",
+                )
+
+    # 3) Disallow everything else
+    else:
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    # Get file info (includes traversal check + existence check)
+    try:
+        file_path, filename, _ = file_storage.get_file_info(job_id, path)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"File not found: {path}. This file may not have been generated yet."
+                ),
+            )
+        raise
+
+    # Determine content type
+    media_type = "application/octet-stream"
+    lower = filename.lower()
+    if lower.endswith(".step"):
+        media_type = "application/step"
+    elif lower.endswith(".json"):
+        media_type = "application/json"
+    elif lower.endswith(".glb"):
+        media_type = "model/gltf-binary"
+    elif lower.endswith(".pdf"):
+        media_type = "application/pdf"
+    elif lower.endswith(".png"):
+        media_type = "image/png"
+    elif lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        media_type = "image/jpeg"
+
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.put("/{job_id}/mode", response_model=JobResponse)
+async def set_job_mode(job_id: str, request: JobModeRequest):
+    """Set job processing mode."""
+    job_service.set_job_mode(job_id, request.mode)
+    return job_service.get_job(job_id)
+
+
+@router.put("/{job_id}/selected-view")
+async def set_selected_view(job_id: str, request: dict):
+    """Save selected view to job state."""
+    _ = job_service.get_job(job_id)  # verify job exists
+
+    outputs_path = file_storage.get_outputs_path(job_id)
+    outputs_path.mkdir(parents=True, exist_ok=True)
+
+    view_file = outputs_path / "selected_view.json"
+    with open(view_file, "w") as f:
+        json.dump(
+            {
+                "page": request.get("page"),
+                "view_index": request.get("view_index"),
+                "timestamp": datetime.now().isoformat(),
+            },
+            f,
+            indent=2,
+        )
+
+    return {
+        "message": "Selected view saved",
+        "page": request.get("page"),
+        "view_index": request.get("view_index"),
+    }
+
+
+@router.delete("/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a job and all its files."""
+    job_service.delete_job(job_id)
+    return {"message": "Job deleted successfully"}

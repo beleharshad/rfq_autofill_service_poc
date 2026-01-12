@@ -1,0 +1,190 @@
+.job-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 80px);
+  padding: 0;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.job-header {
+  padding: 1rem 2rem;
+  background-color: #1a1a1a;
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.job-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.job-status {
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.job-tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 2rem;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #333;
+  width: 100%;
+}
+
+.job-tabs button {
+  padding: 0.75rem 1.5rem;
+  background-color: transparent;
+  color: #888;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+}
+
+.job-tabs button:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
+.job-tabs button.active {
+  color: #646cff;
+  border-bottom-color: #646cff;
+  background-color: #1a1a1a;
+}
+
+.assisted-tab-content {
+  flex: 1;
+  overflow: visible;
+  padding: 1.5rem;
+}
+
+.assisted-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #444;
+  padding-bottom: 0.5rem;
+}
+
+.assisted-tabs button {
+  padding: 0.5rem 1rem;
+  background-color: transparent;
+  color: #aaa;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.assisted-tabs button:hover {
+  color: #fff;
+}
+
+.assisted-tabs button.active {
+  color: #646cff;
+  border-bottom-color: #646cff;
+}
+
+.job-content-area {
+  flex: 1;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.pdf-tab-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  width: 100%;
+}
+
+.profile-tab-content {
+  flex: 1;
+  overflow: visible;
+  width: 100%;
+}
+
+.results-tab-content,
+.logs-tab-content,
+.auto-tab-content {
+  flex: 1;
+  overflow: visible;
+  width: 100%;
+}
+
+.job-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.pdf-selector-pane {
+  width: 250px;
+  padding: 1rem;
+  background-color: #2a2a2a;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pdf-selector-pane label {
+  font-weight: 500;
+  color: #fff;
+}
+
+.pdf-selector {
+  padding: 0.5rem;
+  background-color: #1a1a1a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.pdf-selector:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.pdf-viewer-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.no-pdf {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-style: italic;
+}
+
+.loading,
+.error {
+  padding: 2rem;
+  text-align: center;
+}
+
+.error {
+  color: #ff6b6b;
+}
+

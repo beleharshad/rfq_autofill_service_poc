@@ -1,0 +1,44 @@
+.profile-review-plot {
+  padding: 1rem;
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.profile-review-plot h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.2rem;
+  color: #fff;
+}
+
+.plot-container {
+  overflow-x: auto;
+  background-color: #2a2a2a;
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.plot-svg {
+  display: block;
+}
+
+.od-line {
+  pointer-events: none;
+}
+
+.id-line {
+  pointer-events: none;
+}
+
+.flag-overlay {
+  pointer-events: none;
+}
+
+.confidence-legend {
+  pointer-events: none;
+}
+
+
+
+
+

@@ -1,0 +1,132 @@
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem;
+  background-color: #2a2a2a;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  border: 1px solid #3a3a3a;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.toolbar-label {
+  color: #ccc;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-right: 0.25rem;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 24px;
+  background-color: #555;
+  margin: 0 0.25rem;
+}
+
+.view-mode-selector {
+  display: flex;
+  gap: 0.25rem;
+  background-color: #1a1a1a;
+  border-radius: 6px;
+  padding: 2px;
+  border: 1px solid #333;
+}
+
+.mode-button {
+  padding: 0.4rem 0.8rem;
+  background-color: transparent;
+  color: #ccc;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  font-weight: 600;
+}
+
+.mode-button:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+.mode-button.active {
+  background-color: #646cff;
+  color: white;
+}
+
+.control-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #ccc;
+  font-size: 0.9rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.control-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.control-threshold {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #ccc;
+  font-size: 0.9rem;
+}
+
+.control-threshold input[type="number"] {
+  width: 80px;
+  padding: 0.25rem 0.5rem;
+  background-color: #1a1a1a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.reset-button {
+  padding: 0.5rem 1rem;
+  background-color: #646cff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+  font-weight: 600;
+}
+
+.reset-button:hover {
+  background-color: #535bf2;
+}
+
+.download-glb-btn {
+  padding: 0.5rem 1rem;
+  background-color: #42a5f5;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: background-color 0.2s;
+  display: inline-block;
+  font-weight: 600;
+}
+
+.download-glb-btn:hover {
+  background-color: #1e88e5;
+}
+
+
+

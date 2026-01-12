@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.1",
+  "generated_at_utc": "2026-01-03T19:44:47.110379+00:00",
+  "units": {
+    "length": "in",
+    "area": "in^2",
+    "volume": "in^3"
+  },
+  "z_range": [
+    0.0,
+    4.25
+  ],
+  "segments": [
+    {
+      "z_start": 0.0,
+      "z_end": 3.27,
+      "od_diameter": 1.63,
+      "id_diameter": 1.13,
+      "wall_thickness": 0.25,
+      "volume_in3": 3.5441877521473257,
+      "od_area_in2": 16.745003002898954,
+      "id_area_in2": 11.608499014279642
+    },
+    {
+      "z_start": 3.27,
+      "z_end": 4.25,
+      "od_diameter": 0.806,
+      "id_diameter": 0.753,
+      "wall_thickness": 0.026500000000000024,
+      "volume_in3": 0.06359719216610023,
+      "od_area_in2": 2.4814812052175057,
+      "id_area_in2": 2.318306882790052
+    }
+  ],
+  "totals": {
+    "volume_in3": 3.607784944313426,
+    "od_area_in2": 19.22648420811646,
+    "id_area_in2": 13.926805897069695,
+    "end_face_area_start_in2": 1.0838494654884787,
+    "end_face_area_end_in2": 0.06489509404704105,
+    "od_shoulder_area_in2": 1.5765014590538153,
+    "id_shoulder_area_in2": 0.5575470876123777,
+    "planar_ring_area_in2": 3.2827931062017126,
+    "total_surface_area_in2": 36.436083211387874
+  },
+  "feature_counts": {
+    "external_cylinders": 2,
+    "internal_bores": 2,
+    "planar_faces": 4,
+    "total_faces": 8
+  }
+}

@@ -1,0 +1,108 @@
+.new-job-page {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.mode-selector {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #1a1a1a;
+  color: #fff;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.mode-selector:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.mode-description {
+  color: #aaa;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+.new-job-form {
+  margin-top: 2rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  color: #fff;
+}
+
+.file-input {
+  padding: 0.5rem;
+  cursor: pointer;
+}
+
+.file-list {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background-color: #2a2a2a;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.file-list ul {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.5rem;
+}
+
+.file-list li {
+  margin: 0.25rem 0;
+  color: #ccc;
+}
+
+.error-message {
+  padding: 0.75rem;
+  background-color: #4a1a1a;
+  border: 1px solid #ff6b6b;
+  border-radius: 4px;
+  color: #ff6b6b;
+  margin-bottom: 1rem;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.form-actions {
+  margin-top: 2rem;
+}
+
+.form-actions button {
+  background-color: #646cff;
+  color: white;
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+}
+
+.form-actions button:hover {
+  background-color: #535bf2;
+}
+

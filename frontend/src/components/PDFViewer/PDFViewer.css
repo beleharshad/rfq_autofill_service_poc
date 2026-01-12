@@ -1,0 +1,106 @@
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: #525252;
+}
+
+.pdf-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #444;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pdf-controls-left,
+.pdf-controls-center,
+.pdf-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pdf-controls button {
+  padding: 0.5rem 1rem;
+  background-color: #3a3a3a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.pdf-controls button:hover:not(:disabled) {
+  background-color: #4a4a4a;
+}
+
+.pdf-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-info {
+  color: #fff;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.page-input {
+  width: 50px;
+  padding: 0.25rem;
+  background-color: #1a1a1a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.zoom-info {
+  color: #fff;
+  font-size: 0.9rem;
+  min-width: 50px;
+  text-align: center;
+}
+
+.pdf-container {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 1rem;
+}
+
+.pdf-loading,
+.pdf-error {
+  padding: 2rem;
+  color: #fff;
+  text-align: center;
+}
+
+.pdf-error {
+  color: #ff6b6b;
+}
+
+/* React-PDF styles */
+.react-pdf__Page {
+  margin: 0 auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  background-color: #fff;
+}
+
+.react-pdf__Page__canvas {
+  display: block;
+}
+
+
+
+
+
