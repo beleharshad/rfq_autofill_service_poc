@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq
+from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq, envelope
 
 app = FastAPI(
     title="RFQ 3D View API",
@@ -29,6 +29,7 @@ app.include_router(pdf.router, prefix="/api/v1", tags=["pdf"])
 app.include_router(manual.router, prefix="/api/v1", tags=["manual"])
 app.include_router(step_generation.router, prefix="/api/v1", tags=["step-generation"])
 app.include_router(rfq.router)
+app.include_router(envelope.router)
 
 
 @app.get("/")

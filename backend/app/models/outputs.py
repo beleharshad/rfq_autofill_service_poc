@@ -21,6 +21,10 @@ class OutputsInfo(BaseModel):
     inferred_stack: Optional[OutputFileInfo] = Field(None, description="inferred_stack.json file info")
     turned_stack: Optional[OutputFileInfo] = Field(None, description="turned_stack.json file info")
     run_report: Optional[OutputFileInfo] = Field(None, description="run_report.json file info")
+    features_text: Optional[OutputFileInfo] = Field(None, description="features_text.json file info")
+
+
+
 
 
 

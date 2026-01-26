@@ -15,6 +15,9 @@ function SegmentTable({ summary, highlightedSegment, onSegmentClick, showConfide
     }
   };
 
+  const units = summary.units ?? { length: 'in', area: 'in^2', volume: 'in^3' };
+  const formatUnit = (value: string) => value.replace('^3', '³').replace('^2', '²');
+
   return (
     <div className="segment-table">
       <h3>Segments</h3>
@@ -23,14 +26,14 @@ function SegmentTable({ summary, highlightedSegment, onSegmentClick, showConfide
           <thead>
             <tr>
               <th>#</th>
-              <th>Z Start ({summary.units.length})</th>
-              <th>Z End ({summary.units.length})</th>
-              <th>OD ({summary.units.length})</th>
-              <th>ID ({summary.units.length})</th>
-              <th>Wall ({summary.units.length})</th>
-              <th>Volume ({summary.units.volume})</th>
-              <th>OD Area ({summary.units.area})</th>
-              <th>ID Area ({summary.units.area})</th>
+              <th>Z Start ({formatUnit(units.length)})</th>
+              <th>Z End ({formatUnit(units.length)})</th>
+              <th>OD ({formatUnit(units.length)})</th>
+              <th>ID ({formatUnit(units.length)})</th>
+              <th>Wall ({formatUnit(units.length)})</th>
+              <th>Volume ({formatUnit(units.volume)})</th>
+              <th>OD Area ({formatUnit(units.area)})</th>
+              <th>ID Area ({formatUnit(units.area)})</th>
               {showConfidence && <th>Confidence</th>}
             </tr>
           </thead>

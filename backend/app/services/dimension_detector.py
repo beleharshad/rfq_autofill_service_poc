@@ -8,11 +8,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import os
+
 # Optional EasyOCR import
 try:
+    # Workaround for Windows OpenMP runtime conflicts (torch/numpy).
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     import easyocr
     _EASYOCR_AVAILABLE = True
-except ImportError:
+except Exception:
     _EASYOCR_AVAILABLE = False
     easyocr = None
 

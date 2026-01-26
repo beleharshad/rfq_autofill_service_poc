@@ -16,6 +16,7 @@ from feature_extractor import TurnedPartStack, TurnedPartSegment
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.models.job import JobStatus
+from app.models.part_summary import PartSummary
 from app.services.dimension_detector import DimensionDetector
 import logging
 
@@ -770,6 +771,15 @@ class StackInferenceService:
         pages_dir = outputs_path / "pdf_pages"
         debug_dir = outputs_path / "pdf_inference_debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize variables to ensure they are always defined
+        total_length = 0.0
+        overall_confidence = 0.5
+        normalized_segments = []
+        normalized_stack = None
+        validation_errors = []
+        validation_warnings = []
+        warnings = []
         
         # Load page image
         page_num = best_view["page"]
@@ -857,6 +867,7 @@ class StackInferenceService:
             pixel_to_inch = anchor_dim['inch_per_pixel']
             scale_report = {
                 'method': 'anchor_dimension',
+                'confidence': anchor_dim.get('confidence', 0.9),  # High confidence for anchor dimension
                 'anchor_name': anchor_dim['name'],
                 'anchor_value_inches': anchor_dim['value'],
                 'anchor_pixel_length': anchor_dim['pixel_length'],
@@ -872,6 +883,7 @@ class StackInferenceService:
             pixel_to_inch = estimated_part_length_inches / estimated_part_length_pixels if estimated_part_length_pixels > 0 else 0.01
             scale_report = {
                 'method': 'estimated',
+                'confidence': 0.5,  # Lower confidence for estimated scale
                 'estimated_part_length_pixels': estimated_part_length_pixels,
                 'estimated_part_length_inches': estimated_part_length_inches,
                 'inch_per_pixel': pixel_to_inch,
@@ -1143,12 +1155,20 @@ class StackInferenceService:
                 "flags": flags,
                 "_penalties": [(name, float(penalty)) for name, penalty in penalties]
             })
-        
+
+        # Compute total length before totals
+        if normalized_segments:
+            total_length = sum(seg["z_end"] - seg["z_start"] for seg in normalized_segments)
+
         # Compute totals using normalized stack
+        if normalized_stack is None:
+            raise ValueError("Failed to create normalized stack - no segments to process")
+
         totals = {
             "volume_in3": normalized_stack.total_volume(),
             "od_area_in2": normalized_stack.total_od_surface_area(),
             "id_area_in2": normalized_stack.total_id_surface_area(),
+            "total_length_in": total_length,
             "end_face_area_start_in2": normalized_stack.end_face_area_start(),
             "end_face_area_end_in2": normalized_stack.end_face_area_end(),
             "od_shoulder_area_in2": normalized_stack.od_shoulder_area(),
@@ -1158,18 +1178,14 @@ class StackInferenceService:
         }
         
         # Compute length-weighted overall confidence
-        if normalized_segments:
-            total_length = sum(seg["z_end"] - seg["z_start"] for seg in normalized_segments)
-            if total_length > 0:
-                weighted_sum = sum(
-                    (seg["z_end"] - seg["z_start"]) * seg["confidence"]
-                    for seg in normalized_segments
-                )
-                overall_confidence = weighted_sum / total_length
-            else:
-                overall_confidence = np.mean([s["confidence"] for s in normalized_segments])
+        if normalized_segments and total_length > 0:
+            weighted_sum = sum(
+                (seg["z_end"] - seg["z_start"]) * seg["confidence"]
+                for seg in normalized_segments
+            )
+            overall_confidence = weighted_sum / total_length
         else:
-            overall_confidence = 0.0
+            overall_confidence = np.mean([s["confidence"] for s in normalized_segments]) if normalized_segments else 0.0
         
         # SANITY GATES: Validate inferred dimensions
         validation_errors = []
@@ -1274,28 +1290,32 @@ class StackInferenceService:
             }
             segments_list.append(seg_dict)
         
-        part_summary = {
-            "schema_version": "0.1",
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "units": {
+        part_summary = PartSummary(
+            schema_version="0.1",
+            generated_at_utc=datetime.now(timezone.utc).isoformat(),
+            units={
                 "length": "in",
                 "area": "in^2",
                 "volume": "in^3"
             },
-            "scale_report": scale_report,
-            "z_range": z_range,
-            "segments": segments_list,
-            "totals": totals,
-            "inference_metadata": {
+            scale_report=scale_report,
+            z_range=z_range,
+            segments=segments_list,
+            totals=totals,
+            inference_metadata={
                 "mode": mode,  # "reference_only" or "auto_detect"
                 "overall_confidence": float(overall_confidence),
                 "source": "math_stack_only"  # Math-only path, no OCC solid generated yet
-            }
-        }
+            },
+            features=None  # Features will be added later by feature detection
+        )
+
+        # Convert to dict for JSON serialization
+        part_summary_dict = part_summary.to_dict()
         
         summary_file = outputs_path / "part_summary.json"
         with open(summary_file, 'w') as f:
-            json.dump(part_summary, f, indent=2)
+            json.dump(part_summary_dict, f, indent=2)
         
         # Generate human-readable explanation
         from app.utils.stack_explanation import generate_stack_explanation

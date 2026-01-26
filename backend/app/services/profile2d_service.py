@@ -19,6 +19,7 @@ from app.services.job_service import JobService
 from app.services.run_report_service import RunReportService
 from app.services.step_to_glb_converter import StepToGlbConverter
 from app.models.job import JobStatus, JobMode
+from app.models.part_summary import PartSummary
 
 
 class Profile2DService:
@@ -486,11 +487,40 @@ class Profile2DService:
         self.run_report_service.add_stage(report, "stack_build", "running", stage_start)
         
         # Generate part_summary.json
-        part_summary = stack.to_dict()
+        stack_dict = stack.to_dict()
+
+        # Convert stack.to_dict() to PartSummary format
+        part_summary = PartSummary(
+            schema_version=stack_dict.get("schema_version", "0.1"),
+            generated_at_utc=stack_dict.get("generated_at_utc", datetime.now(timezone.utc).isoformat()),
+            units=stack_dict.get("units", {"length": "in", "area": "in^2", "volume": "in^3"}),
+            scale_report={
+                "method": "profile2d",  # Profile2D input
+                "confidence": 1.0,
+                "notes": "Scale not applicable for Profile2D input"
+            },
+            z_range=stack_dict.get("z_range", [0.0, 0.0]),
+            segments=stack_dict.get("segments", []),
+            totals={
+                "total_volume_in3": stack_dict.get("totals", {}).get("volume_in3", 0.0),
+                "total_od_area_in2": stack_dict.get("totals", {}).get("od_area_in2", 0.0),
+                "total_id_area_in2": stack_dict.get("totals", {}).get("id_area_in2", 0.0),
+                "total_length_in": stack_dict.get("z_range", [0.0, 0.0])[1] - stack_dict.get("z_range", [0.0, 0.0])[0]
+            },
+            inference_metadata={
+                "mode": "profile2d",
+                "overall_confidence": 1.0,  # Profile2D input is assumed correct
+                "source": "profile2d_input"
+            },
+            features=None  # Features will be added later by feature detection
+        )
+
+        # Convert to dict for JSON serialization
+        part_summary_dict = part_summary.to_dict()
         
         summary_file = outputs_path / "part_summary.json"
         with open(summary_file, 'w') as f:
-            json.dump(part_summary, f, indent=2)
+            json.dump(part_summary_dict, f, indent=2)
         
         stage_end = datetime.now(timezone.utc)
         self.run_report_service.add_stage(report, "stack_build", "completed", stage_start, stage_end)

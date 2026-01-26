@@ -17,6 +17,7 @@ from feature_extractor import FeatureExtractor
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.models.job import JobStatus
+from app.models.part_summary import PartSummary
 
 
 class ManualStackService:
@@ -581,27 +582,45 @@ class ManualStackService:
         # Generate part summary JSON
         generated_at_utc = datetime.now(timezone.utc).isoformat()
         
-        part_summary = {
-            "schema_version": "0.1",
-            "generated_at_utc": generated_at_utc,
-            "units": {
+        # Convert totals to expected format (manual stack service has detailed totals)
+        totals_dict = {
+            "total_volume_in3": totals["volume_in3"],
+            "total_od_area_in2": totals["od_area_in2"],
+            "total_id_area_in2": totals["id_area_in2"],
+            "total_length_in": z_range[1] - z_range[0] if len(z_range) >= 2 else 0.0
+        }
+
+        part_summary = PartSummary(
+            schema_version="0.1",
+            generated_at_utc=generated_at_utc,
+            units={
                 "length": units,
                 "area": f"{units}^2",
                 "volume": f"{units}^3"
             },
-            "z_range": z_range,
-            "segments": segments_list,
-            "totals": totals,
-            "inference_metadata": {
+            scale_report={
+                "method": "manual",  # Manual stack input
+                "confidence": 1.0,
+                "notes": "Scale not applicable for manual stack input"
+            },
+            z_range=z_range,
+            segments=segments_list,
+            totals=totals_dict,
+            inference_metadata={
                 "mode": "reference_only",  # Manual input mode - PDF shown as reference only
+                "overall_confidence": 1.0,  # Manual input is assumed correct
                 "source": "math_stack_only"  # Math-only path, no OCC solid generated
-            }
-        }
+            },
+            features=None  # Features will be added later by feature detection
+        )
+
+        # Convert to dict for JSON serialization
+        part_summary_dict = part_summary.to_dict()
         
         # Write part_summary.json
         summary_file = outputs_path / "part_summary.json"
         with open(summary_file, 'w') as f:
-            json.dump(part_summary, f, indent=2)
+            json.dump(part_summary_dict, f, indent=2)
         
         # Generate human-readable explanation
         from app.utils.stack_explanation import generate_stack_explanation

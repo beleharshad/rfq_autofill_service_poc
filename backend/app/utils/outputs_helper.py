@@ -49,8 +49,13 @@ def build_outputs_info(job_id: str, base_url: str = "/api/v1") -> OutputsInfo:
         scale_report=check_file("scale_report.json"),
         inferred_stack=check_file("inferred_stack.json"),
         turned_stack=check_file("turned_stack.json"),
-        run_report=check_file("run_report.json")
+        run_report=check_file("run_report.json"),
+        features_text=check_file("features_text.json"),
+        features_cv=check_file("features_cv.json")
     )
+
+
+
 
 
 

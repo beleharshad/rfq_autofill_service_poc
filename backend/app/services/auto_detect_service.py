@@ -1,5 +1,6 @@
 """Auto-detect turned part views from PDF images."""
 
+import os
 import json
 import cv2
 import numpy as np
@@ -9,9 +10,12 @@ from app.storage.file_storage import FileStorage
 
 # Optional EasyOCR import
 try:
+    # Workaround for Windows OpenMP runtime conflicts (torch/numpy).
+    # Safe for our use: prevents import-time crash; worst-case is reduced performance.
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     import easyocr
     _EASYOCR_AVAILABLE = True
-except ImportError:
+except Exception:
     _EASYOCR_AVAILABLE = False
     easyocr = None
 

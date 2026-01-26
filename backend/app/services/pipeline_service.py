@@ -16,6 +16,7 @@ from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.services.run_report_service import RunReportService
 from app.models.job import JobStatus
+from app.models.part_summary import PartSummary
 
 
 class PipelineService:
@@ -169,24 +170,40 @@ class PipelineService:
         # Generate part summary JSON
         generated_at_utc = datetime.now(timezone.utc).isoformat()
         
-        part_summary = {
-            "schema_version": "0.1",
-            "generated_at_utc": generated_at_utc,
-            "units": {
+        # Convert totals to expected format (pipeline service has more detailed totals)
+        totals_dict = {
+            "total_volume_in3": totals["volume_in3"],
+            "total_od_area_in2": totals["od_area_in2"],
+            "total_id_area_in2": totals["id_area_in2"],
+            "total_length_in": z_range[1] - z_range[0] if len(z_range) >= 2 else 0.0
+        }
+
+        part_summary = PartSummary(
+            schema_version="0.1",
+            generated_at_utc=generated_at_utc,
+            units={
                 "length": units,
                 "area": f"{units}^2",
                 "volume": f"{units}^3"
             },
-            "z_range": z_range,
-            "segments": segments_list,
-            "totals": totals,
-            "feature_counts": {
-                "external_cylinders": 0,  # Not computed from stack input alone
-                "internal_bores": 0,
-                "planar_faces": 0,
-                "total_faces": 0
-            }
-        }
+            scale_report={
+                "method": "manual",  # Manual stack input, no scale calibration
+                "confidence": 1.0,
+                "notes": "Scale not applicable for manual stack input"
+            },
+            z_range=z_range,
+            segments=segments_list,
+            totals=totals_dict,
+            inference_metadata={
+                "mode": "manual_stack",
+                "overall_confidence": 1.0,  # Manual input is assumed correct
+                "source": "manual_stack_input"
+            },
+            features=None  # Features will be added later by feature detection
+        )
+
+        # Convert to dict for JSON serialization
+        part_summary_dict = part_summary.to_dict()
         
         # Stage 3: Generate part summary
         stage_start = datetime.now(timezone.utc)
@@ -195,7 +212,7 @@ class PipelineService:
         # Write part_summary.json
         summary_file = outputs_path / "part_summary.json"
         with open(summary_file, 'w') as f:
-            json.dump(part_summary, f, indent=2)
+            json.dump(part_summary_dict, f, indent=2)
         
         stage_end = datetime.now(timezone.utc)
         self.run_report_service.add_stage(report, "generate_summary", "completed", stage_start, stage_end)

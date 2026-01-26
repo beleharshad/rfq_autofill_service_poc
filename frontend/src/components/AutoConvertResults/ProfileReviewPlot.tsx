@@ -14,9 +14,23 @@ interface ProfileReviewPlotProps {
   segments: Segment[];
   zRange?: [number, number];
   units?: string;
+  features?: any;
+  showHoles?: boolean;
+  showSlots?: boolean;
+  showChamfers?: boolean;
+  showFillets?: boolean;
 }
 
-function ProfileReviewPlot({ segments, zRange, units = 'in' }: ProfileReviewPlotProps) {
+function ProfileReviewPlot({
+  segments,
+  zRange,
+  units = 'in',
+  features,
+  showHoles = false,
+  showSlots = false,
+  showChamfers = false,
+  showFillets = false
+}: ProfileReviewPlotProps) {
   const plotData = useMemo(() => {
     // Calculate z range from segments if not provided
     let minZ = 0;
@@ -48,7 +62,7 @@ function ProfileReviewPlot({ segments, zRange, units = 'in' }: ProfileReviewPlot
     };
   }, [segments, zRange]);
 
-  const { minZ, zRange: zRangeValue, maxRadius } = plotData;
+  const { minZ, maxZ, zRange: zRangeValue, maxRadius } = plotData;
 
   // SVG dimensions
   const width = 800;
@@ -345,9 +359,269 @@ function ProfileReviewPlot({ segments, zRange, units = 'in' }: ProfileReviewPlot
             <circle cx="20" cy="95" r="4" fill="#f44336" stroke="#fff" strokeWidth="1" />
             <text x="30" y="99" fill="#fff" fontSize="11">Low (&lt;60%)</text>
           </g>
+
+          {/* Feature Overlays */}
+          {features && (
+            <>
+              {/* Holes */}
+              {showHoles && features.holes && features.holes.map((hole: any, index: number) => (
+                <FeatureOverlayHole
+                  key={`hole-${index}`}
+                  hole={hole}
+                  index={index}
+                  scaleX={scaleX}
+                  scaleY={scaleY}
+                  minZ={minZ}
+                  maxZ={maxZ}
+                />
+              ))}
+
+              {/* Slots */}
+              {showSlots && features.slots && features.slots.map((slot: any, index: number) => (
+                <FeatureOverlaySlot
+                  key={`slot-${index}`}
+                  slot={slot}
+                  index={index}
+                  scaleX={scaleX}
+                  scaleY={scaleY}
+                  minZ={minZ}
+                  maxZ={maxZ}
+                />
+              ))}
+
+              {/* Chamfers */}
+              {showChamfers && features.chamfers && features.chamfers.map((chamfer: any, index: number) => (
+                <FeatureOverlayChamfer
+                  key={`chamfer-${index}`}
+                  chamfer={chamfer}
+                  index={index}
+                  scaleX={scaleX}
+                  scaleY={scaleY}
+                  minZ={minZ}
+                  maxZ={maxZ}
+                />
+              ))}
+
+              {/* Fillets */}
+              {showFillets && features.fillets && features.fillets.map((fillet: any, index: number) => (
+                <FeatureOverlayFillet
+                  key={`fillet-${index}`}
+                  fillet={fillet}
+                  index={index}
+                  scaleX={scaleX}
+                  scaleY={scaleY}
+                  minZ={minZ}
+                  maxZ={maxZ}
+                />
+              ))}
+            </>
+          )}
         </svg>
       </div>
     </div>
+  );
+}
+
+// Feature overlay components for 2D profile plot
+interface FeatureOverlayProps {
+  scaleX: (z: number) => number;
+  scaleY: (d: number) => number;
+  minZ: number;
+  maxZ: number;
+}
+
+interface FeatureOverlayHoleProps extends FeatureOverlayProps {
+  hole: any;
+  index: number;
+}
+
+function FeatureOverlayHole({ hole, index, scaleX, scaleY, minZ, maxZ }: FeatureOverlayHoleProps) {
+  // Position hole at a reasonable Z location (we don't have exact positioning from text extraction)
+  const zPos = hole.source_view_index >= 0 ? minZ + (hole.source_view_index * (maxZ - minZ) * 0.1) : minZ + ((maxZ - minZ) * 0.5);
+  const x = scaleX(zPos);
+
+  // Position at OD surface with some offset
+  const odRadius = hole.diameter ? hole.diameter * 0.5 : 0.05;
+  const y = scaleY(odRadius);
+
+  return (
+    <g>
+      {/* Hole marker */}
+      <circle
+        cx={x}
+        cy={y}
+        r="6"
+        fill="#ff4444"
+        stroke="#fff"
+        strokeWidth="2"
+        opacity="0.8"
+      />
+      {/* Hole diameter line */}
+      <line
+        x1={x - 15}
+        y1={y}
+        x2={x + 15}
+        y2={y}
+        stroke="#ff4444"
+        strokeWidth="2"
+        opacity="0.6"
+      />
+      {/* Hole label */}
+      <text
+        x={x}
+        y={y - 12}
+        textAnchor="middle"
+        fill="#ff4444"
+        fontSize="10"
+        fontWeight="bold"
+      >
+        H{index + 1}
+      </text>
+      {/* Hole diameter text */}
+      {hole.diameter && (
+        <text
+          x={x}
+          y={y + 20}
+          textAnchor="middle"
+          fill="#ff4444"
+          fontSize="8"
+        >
+          Ø{hole.diameter.toFixed(3)}
+        </text>
+      )}
+    </g>
+  );
+}
+
+interface FeatureOverlaySlotProps extends FeatureOverlayProps {
+  slot: any;
+  index: number;
+}
+
+function FeatureOverlaySlot({ slot, index, scaleX, scaleY, minZ, maxZ }: FeatureOverlaySlotProps) {
+  // Position slot at a reasonable Z location
+  const zPos = slot.source_view_index >= 0 ? minZ + (slot.source_view_index * (maxZ - minZ) * 0.1) : minZ + ((maxZ - minZ) * 0.5);
+  const x = scaleX(zPos);
+
+  // Position at OD surface
+  const odRadius = 0.1; // Default position
+  const y = scaleY(odRadius);
+
+  const slotLength = slot.length || 0.5;
+  const slotWidth = slot.width || 0.1;
+
+  // Scale for display
+  const displayLength = Math.min(slotLength * 20, 40); // Max 40px for display
+  const displayWidth = Math.min(slotWidth * 20, 15);  // Max 15px for display
+
+  return (
+    <g>
+      {/* Slot rectangle */}
+      <rect
+        x={x - displayLength / 2}
+        y={y - displayWidth / 2}
+        width={displayLength}
+        height={displayWidth}
+        fill="#44ff44"
+        stroke="#fff"
+        strokeWidth="1"
+        opacity="0.7"
+        rx="2"
+      />
+      {/* Slot label */}
+      <text
+        x={x}
+        y={y - displayWidth / 2 - 8}
+        textAnchor="middle"
+        fill="#44ff44"
+        fontSize="10"
+        fontWeight="bold"
+      >
+        S{index + 1}
+      </text>
+      {/* Slot dimensions */}
+      <text
+        x={x}
+        y={y + displayWidth / 2 + 15}
+        textAnchor="middle"
+        fill="#44ff44"
+        fontSize="8"
+      >
+        {slotLength.toFixed(3)}×{slotWidth.toFixed(3)}
+      </text>
+    </g>
+  );
+}
+
+interface FeatureOverlayChamferProps extends FeatureOverlayProps {
+  chamfer: any;
+  index: number;
+}
+
+function FeatureOverlayChamfer({ chamfer, index, scaleX, scaleY, minZ, maxZ }: FeatureOverlayChamferProps) {
+  const zPos = chamfer.source_view_index >= 0 ? minZ + (chamfer.source_view_index * (maxZ - minZ) * 0.1) : minZ + ((maxZ - minZ) * 0.5);
+  const x = scaleX(zPos);
+  const y = scaleY(0.05); // Small offset from center
+
+  return (
+    <g>
+      {/* Chamfer marker (triangle) */}
+      <polygon
+        points={`${x},${y - 8} ${x - 6},${y + 4} ${x + 6},${y + 4}`}
+        fill="#ffff44"
+        stroke="#fff"
+        strokeWidth="1"
+        opacity="0.8"
+      />
+      {/* Chamfer label */}
+      <text
+        x={x}
+        y={y + 12}
+        textAnchor="middle"
+        fill="#ffff44"
+        fontSize="9"
+        fontWeight="bold"
+      >
+        C{index + 1}
+      </text>
+    </g>
+  );
+}
+
+interface FeatureOverlayFilletProps extends FeatureOverlayProps {
+  fillet: any;
+  index: number;
+}
+
+function FeatureOverlayFillet({ fillet, index, scaleX, scaleY, minZ, maxZ }: FeatureOverlayFilletProps) {
+  const zPos = fillet.source_view_index >= 0 ? minZ + (fillet.source_view_index * (maxZ - minZ) * 0.1) : minZ + ((maxZ - minZ) * 0.5);
+  const x = scaleX(zPos);
+  const y = scaleY(0.05);
+
+  const radius = fillet.radius || 0.02;
+  const displayRadius = Math.min(radius * 50, 8); // Scale for display
+
+  return (
+    <g>
+      {/* Fillet marker (quarter circle) */}
+      <path
+        d={`M ${x} ${y} A ${displayRadius} ${displayRadius} 0 0 1 ${x + displayRadius} ${y + displayRadius}`}
+        fill="none"
+        stroke="#ff44ff"
+        strokeWidth="2"
+        opacity="0.8"
+      />
+      {/* Fillet label */}
+      <text
+        x={x + displayRadius + 5}
+        y={y + displayRadius / 2}
+        fill="#ff44ff"
+        fontSize="9"
+        fontWeight="bold"
+      >
+        F{index + 1}
+      </text>
+    </g>
   );
 }
 

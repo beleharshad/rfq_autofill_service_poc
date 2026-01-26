@@ -1,6 +1,19 @@
 /**API client for backend communication.*/
 
-import { JobResponse, JobFilesResponse, StackInputRequest, StackInputResponse, PartSummary, RFQAutofillRequest, RFQAutofillResponse } from './types';
+import {
+  JobResponse,
+  JobFilesResponse,
+  StackInputRequest,
+  StackInputResponse,
+  PartSummary,
+  RFQAutofillRequest,
+  RFQAutofillResponse,
+  RFQExportsListResponse,
+  RFQVendorQuoteExtractResponse,
+  RFQEnvelopeResponse,
+  RFQEnvelopeRequest,
+  RunReport,
+} from './types';
 
 const API_BASE_URL = '/api/v1';
 
@@ -10,6 +23,20 @@ async function handleResponse<T>(response: Response): Promise<T> {
     throw new Error(error.detail || `HTTP error! status: ${response.status}`);
   }
   return response.json();
+}
+
+async function handleBlobResponse(response: Response): Promise<{ blob: Blob; filename: string }> {
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    const message = (error && (error.detail || error.message)) ? (error.detail || error.message) : response.statusText;
+    throw new Error(message);
+  }
+
+  const cd = response.headers.get('content-disposition') || response.headers.get('Content-Disposition') || '';
+  const m = /filename\*?=(?:UTF-8''|\"?)([^\";]+)\"?/i.exec(cd);
+  const filename = m?.[1] ? decodeURIComponent(m[1]) : 'rfq_export.xlsx';
+  const blob = await response.blob();
+  return { blob, filename };
 }
 
 export const api = {
@@ -320,16 +347,20 @@ export const api = {
     ranked_views: Array<{
       page: number;
       view_index: number;
-      confidence: number;
-      axis_conf: number;
-      sym_conf: number;
-      dia_text_conf?: number;
-      section_conf?: number;
+      scores: {
+        axis_conf: number;
+        sym_conf: number;
+        dia_text_conf: number;
+        section_conf: number;
+        view_conf: number;
+      };
     }>;
     best_view?: {
       page: number;
       view_index: number;
-      confidence: number;
+      scores: {
+        view_conf: number;
+      };
     } | null;
     confidence_threshold: number;
     total_views_analyzed: number;
@@ -554,7 +585,13 @@ export const api = {
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
     
-    const result = await handleResponse(response);
+    const result = await handleResponse<{
+      status: string;
+      output_step_path?: string;
+      message: string;
+      debug?: any;
+      outputs_info?: any;
+    }>(response);
     console.log('[API] generateStepFromInferredStack result:', result);
     return result;
   },
@@ -628,6 +665,17 @@ export const api = {
     return handleResponse<RFQAutofillResponse>(response);
   },
 
+  async rfqEnvelope(params: RFQEnvelopeRequest): Promise<RFQEnvelopeResponse> {
+    const response = await fetch(`${API_BASE_URL}/rfq/envelope`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+    return handleResponse<RFQEnvelopeResponse>(response);
+  },
+
   /**
    * RFQ AutoFill (v1): server-side load `outputs/part_summary.json` via source.job_id.
    * This avoids sending the full part_summary payload from the browser.
@@ -636,19 +684,89 @@ export const api = {
     rfq_id: string;
     job_id: string;
     part_no: string;
+    mode?: 'ENVELOPE' | 'GEOMETRY';
+    vendor_quote_mode?: boolean;
     tolerances: { rm_od_allowance_in: number; rm_len_allowance_in: number };
     step_metrics?: Record<string, any> | null;
+    cost_inputs?: RFQAutofillRequest['cost_inputs'];
   }): Promise<RFQAutofillResponse> {
     return this.rfqAutofill({
       rfq_id: params.rfq_id,
       part_no: params.part_no,
+      mode: params.mode,
+      vendor_quote_mode: params.vendor_quote_mode,
       source: {
         job_id: params.job_id,
         part_summary: null,
         step_metrics: params.step_metrics ?? null,
       },
       tolerances: params.tolerances,
+      cost_inputs: params.cost_inputs ?? null,
     });
+  },
+
+  /**
+   * RFQ Excel export: generate a NEW filled XLSX copy and download it as a blob.
+   */
+  async rfqExportXlsx(request: RFQAutofillRequest): Promise<{ blob: Blob; filename: string }> {
+    const response = await fetch(`${API_BASE_URL}/rfq/export_xlsx`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    return handleBlobResponse(response);
+  },
+
+  async rfqExportXlsxForJob(params: {
+    rfq_id: string;
+    job_id: string;
+    part_no: string;
+    mode?: 'ENVELOPE' | 'GEOMETRY';
+    tolerances: { rm_od_allowance_in: number; rm_len_allowance_in: number };
+    step_metrics?: Record<string, any> | null;
+    cost_inputs?: RFQAutofillRequest['cost_inputs'];
+  }): Promise<{ blob: Blob; filename: string }> {
+    return this.rfqExportXlsx({
+      rfq_id: params.rfq_id,
+      part_no: params.part_no,
+      mode: params.mode,
+      source: {
+        job_id: params.job_id,
+        part_summary: null,
+        step_metrics: params.step_metrics ?? null,
+      },
+      tolerances: params.tolerances,
+      cost_inputs: params.cost_inputs ?? null,
+    });
+  },
+
+  /**
+   * List generated XLSX exports (newest first).
+   */
+  async rfqListExports(rfq_id: string): Promise<RFQExportsListResponse> {
+    const response = await fetch(`${API_BASE_URL}/rfq/exports?rfq_id=${encodeURIComponent(rfq_id)}`);
+    return handleResponse<RFQExportsListResponse>(response);
+  },
+
+  /**
+   * Download a previously generated export file.
+   */
+  async rfqDownloadExport(rfq_id: string, filename: string): Promise<{ blob: Blob; filename: string }> {
+    const response = await fetch(`${API_BASE_URL}/rfq/exports/${encodeURIComponent(rfq_id)}/${encodeURIComponent(filename)}`);
+    // Content-Disposition should already include a filename; fall back to the provided name.
+    const res = await handleBlobResponse(response);
+    return { blob: res.blob, filename: res.filename || filename };
+  },
+
+  /**
+   * Vendor Quote extraction (OCR): extract RFQ/Excel-like fields directly from the job PDF.
+   * Uses existing job artifacts (pdf_pages + auto_detect_results + pdf_views).
+   */
+  async rfqVendorQuoteExtract(job_id: string): Promise<RFQVendorQuoteExtractResponse> {
+    const response = await fetch(`${API_BASE_URL}/rfq/vendor_quote_extract?job_id=${encodeURIComponent(job_id)}`, {
+      method: 'POST',
+    });
+    return handleResponse<RFQVendorQuoteExtractResponse>(response);
   },
 
   // Backwards-compatible alias (older UI code)

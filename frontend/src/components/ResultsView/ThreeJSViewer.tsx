@@ -15,6 +15,10 @@ interface ThreeJSViewerProps {
   summary: PartSummary;
   jobId: string;
   onHoveredSegmentChange?: (index: number | null) => void;
+  showHoles?: boolean;
+  showSlots?: boolean;
+  showChamfers?: boolean;
+  showFillets?: boolean;
 }
 
 interface SegmentMeshProps {
@@ -417,6 +421,10 @@ interface FeatureOverlaysProps {
   showShoulderPlanes: boolean;
   highlightThinWall: boolean;
   thinWallThreshold: number;
+  showHoles?: boolean;
+  showSlots?: boolean;
+  showChamfers?: boolean;
+  showFillets?: boolean;
 }
 
 function FeatureOverlays({
@@ -426,6 +434,10 @@ function FeatureOverlays({
   showShoulderPlanes,
   highlightThinWall,
   thinWallThreshold,
+  showHoles = false,
+  showSlots = false,
+  showChamfers = false,
+  showFillets = false,
 }: FeatureOverlaysProps) {
   // Collect all Z boundaries for shoulder discs
   const zBoundaries = useMemo(() => {
@@ -502,6 +514,79 @@ function FeatureOverlays({
             idRadius={boundary.idRadius}
           />
         ))}
+
+      {/* Detected Feature Overlays */}
+      {summary.features && (
+        <>
+          {/* Holes - limit to 15 for cleaner visualization */}
+          {showHoles && summary.features.holes && (() => {
+            // Calculate part dimensions for positioning
+            const maxOD = Math.max(...summary.segments.map(s => s.od_diameter));
+            const partLength = summary.z_range ? 
+              (summary.z_range[1] - summary.z_range[0]) : 
+              (summary.segments.length > 0 ? 
+                summary.segments[summary.segments.length - 1].z_end - summary.segments[0].z_start : 2);
+            
+            // Limit displayed holes to avoid clutter, show highest confidence first
+            const sortedHoles = [...summary.features.holes]
+              .sort((a: any, b: any) => (b.confidence || 0) - (a.confidence || 0))
+              .slice(0, 15);
+            const totalHoles = sortedHoles.length;
+            
+            return sortedHoles.map((hole: any, index: number) => (
+              <FeatureHole
+                key={`hole-${index}`}
+                hole={hole}
+                index={index}
+                totalHoles={totalHoles}
+                partMaxOD={maxOD}
+                partLength={partLength}
+              />
+            ));
+          })()}
+
+          {/* Slots */}
+          {showSlots && summary.features.slots && (() => {
+            const maxOD = Math.max(...summary.segments.map(s => s.od_diameter));
+            const partLength = summary.z_range ? 
+              (summary.z_range[1] - summary.z_range[0]) : 
+              (summary.segments.length > 0 ? 
+                summary.segments[summary.segments.length - 1].z_end - summary.segments[0].z_start : 2);
+            const totalSlots = summary.features.slots.length;
+            
+            return summary.features.slots.map((slot: any, index: number) => (
+              <FeatureSlot
+                key={`slot-${index}`}
+                slot={slot}
+                index={index}
+                totalSlots={totalSlots}
+                partMaxOD={maxOD}
+                partLength={partLength}
+              />
+            ));
+          })()}
+
+          {/* Chamfers - Simple markers for now */}
+          {showChamfers && summary.features.chamfers &&
+            summary.features.chamfers.map((chamfer: any, index: number) => (
+              <FeatureChamfer
+                key={`chamfer-${index}`}
+                chamfer={chamfer}
+                index={index}
+              />
+            ))}
+
+          {/* Fillets - Simple markers for now */}
+          {showFillets && summary.features.fillets &&
+            summary.features.fillets.map((fillet: any, index: number) => (
+              <FeatureFillet
+                key={`fillet-${index}`}
+                fillet={fillet}
+                index={index}
+              />
+            ))}
+        </>
+      )}
     </>
   );
 }
@@ -637,12 +722,12 @@ function useHoverDetection(
   });
 }
 
-function Scene({ 
-  summary, 
-  showOD, 
-  showID, 
-  highlightThinWall, 
-  thinWallThreshold, 
+function Scene({
+  summary,
+  showOD,
+  showID,
+  highlightThinWall,
+  thinWallThreshold,
   glbUrl,
   showODOverlay,
   showIDOverlay,
@@ -651,6 +736,10 @@ function Scene({
   hoveredSegmentIndex,
   onHoverChange,
   viewMode,
+  showHoles = false,
+  showSlots = false,
+  showChamfers = false,
+  showFillets = false,
 }: {
   summary: PartSummary;
   showOD: boolean;
@@ -665,6 +754,10 @@ function Scene({
   hoveredSegmentIndex: number | null;
   onHoverChange: (index: number | null) => void;
   viewMode: ViewMode;
+  showHoles?: boolean;
+  showSlots?: boolean;
+  showChamfers?: boolean;
+  showFillets?: boolean;
 }) {
   // Enable hover detection
   useHoverDetection(jobId, onHoverChange);
@@ -722,6 +815,10 @@ function Scene({
         showShoulderPlanes={showShoulderPlanes}
         highlightThinWall={highlightThinWall}
         thinWallThreshold={thinWallThreshold}
+        showHoles={showHoles}
+        showSlots={showSlots}
+        showChamfers={showChamfers}
+        showFillets={showFillets}
       />
 
       {/* Hover Highlight Overlay */}
@@ -756,54 +853,52 @@ function Tooltip({ segment, segmentIndex, visible, mouseX, mouseY, containerRef,
     const rect = container.getBoundingClientRect();
     const tooltipWidth = 320;
     const tooltipHeight = 280;
-    
+
+    // Position tooltip within the container, preferring corners to avoid the 3D model
     // Calculate mouse position relative to container
     const mouseXRelative = mouseX - rect.left;
     const mouseYRelative = mouseY - rect.top;
-    
-    // Determine which corner/edge to use based on mouse position
-    // Prefer corners to avoid covering the center of the 3D view
+
+    // Define safe zones - avoid the center area where the 3D model is displayed
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
-    
+    const safeZoneMargin = 100; // pixels from center to avoid
+
     let x: number;
     let y: number;
-    
-    // If mouse is in the left half, prefer right side (to avoid covering model)
-    if (mouseXRelative < centerX) {
-      // Right side positioning
-      x = Math.min(mouseXRelative + 20, rect.width - tooltipWidth - 10);
-      // If that would overlap, use far right
-      if (x < mouseXRelative + 10) {
-        x = rect.width - tooltipWidth - 10;
-      }
+
+    // Determine best corner based on mouse position and safe zones
+    if (mouseXRelative < centerX - safeZoneMargin) {
+      // Mouse is in left safe zone - position on far right
+      x = rect.width - tooltipWidth - 10;
+    } else if (mouseXRelative > centerX + safeZoneMargin) {
+      // Mouse is in right safe zone - position on far left
+      x = 10;
     } else {
-      // Left side positioning
-      x = Math.max(mouseXRelative - tooltipWidth - 20, 10);
-      // If that would overlap, use far left
-      if (x > mouseXRelative - 10) {
-        x = 10;
+      // Mouse is in center X - choose based on available space
+      if (rect.width - mouseXRelative > tooltipWidth + 20) {
+        x = mouseXRelative + 20;
+      } else {
+        x = mouseXRelative - tooltipWidth - 20;
       }
     }
-    
-    // If mouse is in the top half, prefer bottom positioning
-    if (mouseYRelative < centerY) {
-      // Bottom positioning
-      y = Math.min(mouseYRelative + 20, rect.height - tooltipHeight - 10);
-      // If that would overlap, use bottom edge
-      if (y < mouseYRelative + 10) {
-        y = rect.height - tooltipHeight - 10;
-      }
+
+    if (mouseYRelative < centerY - safeZoneMargin) {
+      // Mouse is in top safe zone - position at bottom
+      y = rect.height - tooltipHeight - 10;
+    } else if (mouseYRelative > centerY + safeZoneMargin) {
+      // Mouse is in bottom safe zone - position at top
+      y = 10;
     } else {
-      // Top positioning
-      y = Math.max(mouseYRelative - tooltipHeight - 20, 10);
-      // If that would overlap, use top edge
-      if (y > mouseYRelative - 10) {
-        y = 10;
+      // Mouse is in center Y - choose based on available space
+      if (rect.height - mouseYRelative > tooltipHeight + 20) {
+        y = mouseYRelative + 20;
+      } else {
+        y = mouseYRelative - tooltipHeight - 20;
       }
     }
-    
-    // Final clamp to ensure it's within bounds
+
+    // Final bounds checking to ensure tooltip stays within container
     x = Math.max(10, Math.min(x, rect.width - tooltipWidth - 10));
     y = Math.max(10, Math.min(y, rect.height - tooltipHeight - 10));
 
@@ -919,7 +1014,15 @@ function Tooltip({ segment, segmentIndex, visible, mouseX, mouseY, containerRef,
   );
 }
 
-function ThreeJSViewer({ summary, jobId, onHoveredSegmentChange }: ThreeJSViewerProps) {
+function ThreeJSViewer({
+  summary,
+  jobId,
+  onHoveredSegmentChange,
+  showHoles = false,
+  showSlots = false,
+  showChamfers = false,
+  showFillets = false
+}: ThreeJSViewerProps) {
   // View mode state
   const [viewMode, setViewMode] = useState<ViewMode>('standard');
   
@@ -1063,6 +1166,10 @@ function ThreeJSViewer({ summary, jobId, onHoveredSegmentChange }: ThreeJSViewer
             hoveredSegmentIndex={hoveredSegmentIndex}
             onHoverChange={handleHoverChange}
             viewMode={viewMode}
+            showHoles={showHoles}
+            showSlots={showSlots}
+            showChamfers={showChamfers}
+            showFillets={showFillets}
           />
         </Canvas>
         <Tooltip
@@ -1093,6 +1200,187 @@ function ThreeJSViewer({ summary, jobId, onHoveredSegmentChange }: ThreeJSViewer
       </div>
     </div>
   );
+}
+
+// Feature overlay components
+interface FeatureHoleProps {
+  hole: any;
+  index: number;
+  totalHoles?: number;
+  partMaxOD?: number;
+  partLength?: number;
+}
+
+function FeatureHole({ hole, index, totalHoles = 1, partMaxOD = 2, partLength = 2 }: FeatureHoleProps) {
+  // Show holes as small ring indicators on the part surface
+  // Much more subtle visualization
+  
+  const holeRadius = Math.min((hole.diameter * 0.5) || 0.05, 0.15); // Cap size
+  const kind = hole.kind || 'cross';
+  
+  // Position on OD surface with better distribution
+  const odRadius = (partMaxOD / 2) + 0.01; // Slightly outside OD
+  
+  // Use golden ratio for better angular distribution (less clustering)
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5)); // ~137.5 degrees
+  const angle = index * goldenAngle;
+  
+  // Distribute along Z with some randomization based on index
+  const zBase = (index / Math.max(totalHoles - 1, 1)) * partLength;
+  const zPosition = Math.max(0.05, Math.min(partLength - 0.05, zBase));
+  
+  if (kind === 'axial') {
+    // Axial holes - show as ring on end face
+    return (
+      <group position={[0, 0, partLength + 0.02]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[holeRadius, 0.01, 8, 24]} />
+          <meshStandardMaterial
+            color="#ff4444"
+            emissive="#ff2222"
+            emissiveIntensity={0.8}
+          />
+        </mesh>
+      </group>
+    );
+  }
+  
+  // Cross holes - show as small ring on OD surface
+  const xPos = Math.cos(angle) * odRadius;
+  const yPos = Math.sin(angle) * odRadius;
+  
+  return (
+    <group position={[xPos, yPos, zPosition]}>
+      {/* Ring indicator on surface - oriented to face outward */}
+      <mesh rotation={[0, -angle + Math.PI/2, Math.PI/2]}>
+        <torusGeometry args={[holeRadius, 0.008, 8, 24]} />
+        <meshStandardMaterial
+          color="#ff4444"
+          emissive="#ff2222"
+          emissiveIntensity={0.8}
+        />
+      </mesh>
+      {/* Small dot at center */}
+      <mesh>
+        <sphereGeometry args={[0.015, 8, 8]} />
+        <meshStandardMaterial
+          color="#ff6666"
+          emissive="#ff4444"
+          emissiveIntensity={1.0}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+interface FeatureSlotProps {
+  slot: any;
+  index: number;
+  totalSlots?: number;
+  partMaxOD?: number;
+  partLength?: number;
+}
+
+function FeatureSlot({ slot, index, totalSlots = 1, partMaxOD = 2, partLength = 2 }: FeatureSlotProps) {
+  const orientation = slot.orientation || 'axial';
+  const slotLength = Math.min(slot.length || 0.3, 0.5); // Cap size
+  const slotWidth = Math.min(slot.width || 0.05, 0.1);
+  
+  // Position slots along the part with offset from holes
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const angle = index * goldenAngle + Math.PI / 3; // Offset from holes
+  
+  const zBase = (index / Math.max(totalSlots - 1, 1)) * partLength;
+  const zPosition = Math.max(0.1, Math.min(partLength - 0.1, zBase));
+  const odRadius = (partMaxOD / 2) + 0.01;
+  
+  const xPos = Math.cos(angle) * odRadius;
+  const yPos = Math.sin(angle) * odRadius;
+  
+  // Show slots as wireframe rectangles on surface
+  return (
+    <group position={[xPos, yPos, zPosition]}>
+      <mesh rotation={[0, -angle + Math.PI/2, Math.PI/2]}>
+        <boxGeometry args={[slotLength, 0.02, slotWidth]} />
+        <meshStandardMaterial
+          color="#44ff44"
+          emissive="#22ff22"
+          emissiveIntensity={0.8}
+          wireframe={orientation === 'radial'}
+        />
+      </mesh>
+      {/* Small indicator sphere */}
+      <mesh>
+        <sphereGeometry args={[0.012, 8, 8]} />
+        <meshStandardMaterial
+          color="#66ff66"
+          emissive="#44ff44"
+          emissiveIntensity={1.0}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+interface FeatureChamferProps {
+  chamfer: any;
+  index: number;
+}
+
+function FeatureChamfer({ chamfer, index }: FeatureChamferProps) {
+  // Simple marker for chamfer - small sphere
+  const zPosition = chamfer.source_view_index * 0.5 || 0;
+  const radius = chamfer.size || 0.02;
+
+  return (
+    <group position={[0, radius * 2, zPosition]}>
+      <mesh>
+        <sphereGeometry args={[radius, 8, 8]} />
+        <meshStandardMaterial
+          color="#ffff44"
+          emissive="#ffff44"
+          emissiveIntensity={0.5}
+        />
+      </mesh>
+      <FeatureLabel text={`C${index + 1}`} position={[0, radius * 3, 0]} />
+    </group>
+  );
+}
+
+interface FeatureFilletProps {
+  fillet: any;
+  index: number;
+}
+
+function FeatureFillet({ fillet, index }: FeatureFilletProps) {
+  // Simple marker for fillet - small torus
+  const zPosition = fillet.source_view_index * 0.5 || 0;
+  const radius = fillet.radius || 0.02;
+
+  return (
+    <group position={[0, radius * 2, zPosition]}>
+      <mesh>
+        <torusGeometry args={[radius * 1.5, radius * 0.5, 8, 16]} />
+        <meshStandardMaterial
+          color="#ff44ff"
+          emissive="#ff44ff"
+          emissiveIntensity={0.5}
+        />
+      </mesh>
+      <FeatureLabel text={`F${index + 1}`} position={[0, radius * 4, 0]} />
+    </group>
+  );
+}
+
+interface FeatureLabelProps {
+  text: string;
+  position: [number, number, number];
+}
+
+function FeatureLabel({ text: _text, position: _position }: FeatureLabelProps) {
+  // For now, we'll skip text labels as they require additional Three.js setup
+  // This could be implemented with TextGeometry or HTML overlays
+  return null;
 }
 
 export default ThreeJSViewer;

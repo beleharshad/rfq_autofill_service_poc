@@ -35,6 +35,12 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
   const [stepFromStackStatus, setStepFromStackStatus] = useState<string | null>(null);
   const [downloadingStep, setDownloadingStep] = useState(false);
 
+  // Feature visualization toggles
+  const [showHoles, setShowHoles] = useState(true);
+  const [showSlots, setShowSlots] = useState(true);
+  const [showChamfers, setShowChamfers] = useState(false);
+  const [showFillets, setShowFillets] = useState(false);
+
   useEffect(() => {
     const loadSummary = async () => {
       try {
@@ -241,7 +247,7 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
           <div className="mode-switch-section">
             <button
               className="switch-mode-btn"
-              onClick={() => onSwitchMode(isAutoMode ? 'manual' : 'auto')}
+              onClick={() => onSwitchMode(isAutoMode ? 'assisted_manual' : 'auto_convert')}
             >
               Switch to {isAutoMode ? 'Manual' : 'Auto Convert'} Mode
             </button>
@@ -381,6 +387,53 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
         onSegmentHover={(index) => setHighlightedSegment(index ?? undefined)}
         onSegmentClick={setHighlightedSegment}
       />
+      {/* Feature toggles for 3D viewer */}
+      {summary?.features && (
+        <div className="feature-toggles" style={{ 
+          display: 'flex', 
+          gap: '1rem', 
+          padding: '0.5rem 1rem',
+          background: '#1a1a2e',
+          borderRadius: '6px',
+          marginBottom: '1rem',
+          flexWrap: 'wrap',
+          alignItems: 'center'
+        }}>
+          <span style={{ color: '#888', fontSize: '0.9rem' }}>3D Features:</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={showHoles} 
+              onChange={(e) => setShowHoles(e.target.checked)} 
+            />
+            <span style={{ color: '#ff4444' }}>Holes ({summary.features.holes?.length || 0})</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={showSlots} 
+              onChange={(e) => setShowSlots(e.target.checked)} 
+            />
+            <span style={{ color: '#44ff44' }}>Slots ({summary.features.slots?.length || 0})</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={showChamfers} 
+              onChange={(e) => setShowChamfers(e.target.checked)} 
+            />
+            <span style={{ color: '#ffff44' }}>Chamfers ({summary.features.chamfers?.length || 0})</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+            <input 
+              type="checkbox" 
+              checked={showFillets} 
+              onChange={(e) => setShowFillets(e.target.checked)} 
+            />
+            <span style={{ color: '#ff44ff' }}>Fillets ({summary.features.fillets?.length || 0})</span>
+          </label>
+        </div>
+      )}
       <ThreeJSViewer 
         summary={summary} 
         jobId={jobId}
@@ -388,6 +441,10 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
           // Sync table highlight with 3D viewer hover
           setHighlightedSegment(index ?? undefined);
         }}
+        showHoles={showHoles}
+        showSlots={showSlots}
+        showChamfers={showChamfers}
+        showFillets={showFillets}
       />
       <SegmentTable
         summary={summary}

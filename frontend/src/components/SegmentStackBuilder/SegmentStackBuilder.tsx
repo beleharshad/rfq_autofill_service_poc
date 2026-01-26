@@ -65,7 +65,7 @@ function SegmentStackBuilder({ jobId, onSuccess }: SegmentStackBuilderProps) {
     return (od - id) / 2.0;
   };
 
-  const validateSegment = (segment: Segment, index: number): SegmentErrors => {
+  const validateSegment = (segment: Segment, _index: number): SegmentErrors => {
     const segErrors: SegmentErrors = {};
 
     if (segment.z_start >= segment.z_end) {

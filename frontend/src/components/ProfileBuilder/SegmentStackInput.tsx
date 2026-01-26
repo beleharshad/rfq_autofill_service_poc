@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
-import type { SegmentInput } from '../../services/types';
 import './SegmentStackInput.css';
 
 interface SegmentStackInputProps {

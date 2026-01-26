@@ -8,12 +8,21 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',  // Use IPv4 explicitly
         changeOrigin: true,
+        timeout: 120000,  // 2 minutes for large file uploads
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.error('Proxy error:', err);
+          });
+        },
       },
     },
   },
 })
+
+
+
 
 
 

@@ -139,6 +139,68 @@ export interface PartSummary {
     overall_confidence?: number;
     source?: string;
   };
+  features?: {
+    holes: Array<{
+      type: string;
+      confidence: number;
+      source_page: number;
+      source_view_index?: number;
+      diameter: number;
+      depth?: number;
+      kind: string;
+      count?: number;
+      pattern?: string;
+      notes?: string;
+    }>;
+    slots: Array<{
+      type: string;
+      confidence: number;
+      source_page: number;
+      source_view_index?: number;
+      width: number;
+      length: number;
+      depth?: number;
+      orientation: string;
+      count?: number;
+      pattern?: string;
+      notes?: string;
+    }>;
+    chamfers: Array<{
+      type: string;
+      confidence: number;
+      source_page: number;
+      source_view_index?: number;
+      size: number;
+      angle: number;
+      edge_location: string;
+      notes?: string;
+    }>;
+    fillets: Array<{
+      type: string;
+      confidence: number;
+      source_page: number;
+      source_view_index?: number;
+      radius: number;
+      edge_location: string;
+      notes?: string;
+    }>;
+    threads: Array<{
+      type: string;
+      confidence: number;
+      source_page: number;
+      source_view_index?: number;
+      designation: string;
+      length?: number;
+      kind: string;
+      notes?: string;
+    }>;
+    meta: {
+      model_version: string;
+      detector_version: string;
+      timestamp_utc: string;
+      warnings: string[];
+    };
+  };
 }
 
 export interface RFQFieldValue {
@@ -150,6 +212,8 @@ export interface RFQFieldValue {
 export interface RFQAutofillRequest {
   rfq_id: string;
   part_no: string;
+  mode?: 'ENVELOPE' | 'GEOMETRY';
+  vendor_quote_mode?: boolean;
   source: {
     part_summary: any | null;
     job_id?: string | null;
@@ -159,6 +223,26 @@ export interface RFQAutofillRequest {
     rm_od_allowance_in: number;
     rm_len_allowance_in: number;
   };
+  cost_inputs?: {
+    rm_rate_per_kg: number;
+    turning_rate_per_min: number;
+    roughing_cost?: number;
+    inspection_cost?: number;
+    special_process_cost?: number | null;
+    material_density_kg_m3?: number;
+  } | null;
+}
+
+export interface RFQAutofillEstimate {
+  rm_weight_kg: RFQFieldValue;
+  material_cost: RFQFieldValue;
+  roughing_cost: RFQFieldValue;
+  inspection_cost: RFQFieldValue;
+  special_process_cost: RFQFieldValue;
+  turning_minutes: RFQFieldValue;
+  turning_cost: RFQFieldValue;
+  subtotal: RFQFieldValue;
+  total_estimate: RFQFieldValue;
 }
 
 export interface RFQAutofillResponse {
@@ -178,5 +262,70 @@ export interface RFQAutofillResponse {
     scale_method: string;
     overall_confidence: number;
     min_len_gate_in: number;
+    bore_coverage_pct?: number;
+    max_od_seg_conf?: number | null;
+    used_z_range?: boolean | null;
+    od_pool_count?: number | null;
+    od_pool_dropped_low_conf?: boolean | null;
+    id_auto_clamped?: boolean | null;
+    od_spike_suspect?: boolean | null;
   };
+  estimate?: RFQAutofillEstimate | null;
+}
+
+export interface RFQExportFileInfo {
+  filename: string;
+  size_bytes: number;
+  mtime_utc: string;
+}
+
+export interface RFQExportsListResponse {
+  rfq_id: string;
+  files: RFQExportFileInfo[];
+}
+
+export interface RFQEnvelopeFields {
+  finish_max_od_in: RFQFieldValue;
+  finish_len_in: RFQFieldValue;
+  raw_max_od_in: RFQFieldValue;
+  raw_len_in: RFQFieldValue;
+}
+
+export interface RFQEnvelopeDebug {
+  max_od_in: number;
+  overall_len_in: number;
+  min_len_gate_in: number;
+  scale_method: string;
+  overall_confidence: number;
+  validation_passed?: boolean | null;
+  notes: string[];
+}
+
+export interface RFQEnvelopeRequest {
+  rfq_id: string;
+  part_no: string;
+  source: { job_id: string } | { part_summary: any };
+  allowances: { od_in: number; len_in: number };
+  rounding?: { od_step: number; len_step: number };
+}
+
+export interface RFQEnvelopeResponse {
+  part_no: string;
+  fields: RFQEnvelopeFields;
+  status: 'AUTO_FILLED' | 'NEEDS_REVIEW' | 'REJECTED';
+  reasons: string[];
+  debug: RFQEnvelopeDebug;
+}
+
+export interface RFQVendorQuoteExtractField {
+  value: string | null;
+  confidence: number;
+  source: string;
+}
+
+export interface RFQVendorQuoteExtractResponse {
+  job_id: string;
+  fields: Record<string, RFQVendorQuoteExtractField>;
+  pdf_hint?: Record<string, RFQVendorQuoteExtractField>;
+  debug: Record<string, any>;
 }

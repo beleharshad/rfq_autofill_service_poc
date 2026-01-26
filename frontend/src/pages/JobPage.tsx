@@ -20,7 +20,6 @@ function JobPage() {
   const [selectedPdf, setSelectedPdf] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('pdf');
   const [assistedSubTab, setAssistedSubTab] = useState<'view' | 'dimensions'>('view');
-  const [selectedView, setSelectedView] = useState<{ page: number; viewIndex: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

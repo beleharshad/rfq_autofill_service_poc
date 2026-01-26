@@ -33,7 +33,7 @@ function ProfilePlot({ summary, highlightedSegment, onSegmentHover, onSegmentCli
     };
   }, [summary]);
 
-  const { minZ, maxZ, zRange, maxRadius, padding } = plotData;
+  const { minZ, zRange, maxRadius } = plotData;
 
   // SVG dimensions
   const width = 800;
