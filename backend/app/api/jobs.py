@@ -164,6 +164,7 @@ async def download_file(job_id: str, path: str):
                 "auto_detect_results.json",
                 "selected_view.json",
                 "step_approval.json",
+                "llm_analysis.json",
             }
 
             if filename not in allowed_output_files:

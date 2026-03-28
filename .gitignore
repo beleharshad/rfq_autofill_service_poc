@@ -1,0 +1,27 @@
+# Cursor/IDE
+.cursor/
+.vscode/
+.idea/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data/runtime
+data/
+*.db
+*.sqlite
+backend/tmp/
+backend/backend/
+
+# Exports
+**/rfq_estimation/exports/
+**/exports/*.xlsx
+
+# Logs
+*.log
+
+# Backups
+*.backup
+

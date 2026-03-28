@@ -13,6 +13,7 @@ import {
   RFQEnvelopeResponse,
   RFQEnvelopeRequest,
   RunReport,
+  LLMAnalysisResult,
 } from './types';
 
 const API_BASE_URL = '/api/v1';
@@ -364,6 +365,14 @@ export const api = {
     } | null;
     confidence_threshold: number;
     total_views_analyzed: number;
+    llm_analysis?: {
+      extracted?: Record<string, any>;
+      validation?: { recommendation: string; overall_confidence: number; cross_checks: string[] };
+      code_issues?: string[];
+      valid?: boolean;
+      vision_mode?: boolean;
+      error?: string;
+    };
   }> {
     console.log('[API] Calling autoDetectTurnedView for job:', jobId);
     const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/pdf/auto_detect_turned_view`, {
@@ -392,6 +401,7 @@ export const api = {
       } | null;
       confidence_threshold: number;
       total_views_analyzed: number;
+      llm_analysis?: Record<string, any>;
     }>(response);
     console.log('[API] autoDetectTurnedView result:', result);
     return result;
@@ -706,10 +716,23 @@ export const api = {
   },
 
   /**
-   * RFQ Excel export: generate a NEW filled XLSX copy and download it as a blob.
+   * RFQ Excel export with mode selection.
+   * @param request - RFQ autofill request
+   * @param exportMode - "master" (update master file), "new_file" (create/update custom file), "copy" (timestamped copies)
+   * @param customFilename - For new_file mode: filename (creates if new, updates if exists)
    */
-  async rfqExportXlsx(request: RFQAutofillRequest): Promise<{ blob: Blob; filename: string }> {
-    const response = await fetch(`${API_BASE_URL}/rfq/export_xlsx`, {
+  async rfqExportXlsx(
+    request: RFQAutofillRequest,
+    exportMode: 'master' | 'new_file' | 'copy' = 'master',
+    customFilename?: string
+  ): Promise<{ blob: Blob; filename: string }> {
+    const params = new URLSearchParams();
+    params.append('export_mode', exportMode);
+    if (customFilename) {
+      params.append('custom_filename', customFilename);
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/rfq/export_xlsx?${params.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -725,19 +748,25 @@ export const api = {
     tolerances: { rm_od_allowance_in: number; rm_len_allowance_in: number };
     step_metrics?: Record<string, any> | null;
     cost_inputs?: RFQAutofillRequest['cost_inputs'];
+    exportMode?: 'master' | 'new_file' | 'copy';
+    customFilename?: string;
   }): Promise<{ blob: Blob; filename: string }> {
-    return this.rfqExportXlsx({
-      rfq_id: params.rfq_id,
-      part_no: params.part_no,
-      mode: params.mode,
-      source: {
-        job_id: params.job_id,
-        part_summary: null,
-        step_metrics: params.step_metrics ?? null,
+    return this.rfqExportXlsx(
+      {
+        rfq_id: params.rfq_id,
+        part_no: params.part_no,
+        mode: params.mode,
+        source: {
+          job_id: params.job_id,
+          part_summary: null,
+          step_metrics: params.step_metrics ?? null,
+        },
+        tolerances: params.tolerances,
+        cost_inputs: params.cost_inputs ?? null,
       },
-      tolerances: params.tolerances,
-      cost_inputs: params.cost_inputs ?? null,
-    });
+      params.exportMode ?? 'master',
+      params.customFilename
+    );
   },
 
   /**
@@ -772,6 +801,69 @@ export const api = {
   // Backwards-compatible alias (older UI code)
   async autofillRFQ(request: RFQAutofillRequest): Promise<RFQAutofillResponse> {
     return this.rfqAutofill(request);
+  },
+
+  /**
+   * Run two-agent LLM analysis on the job's uploaded PDF.
+   * Extracts part specs (Agent 1) and validates them (Agent 2).
+   */
+  async llmAnalyzeJob(jobId: string): Promise<LLMAnalysisResult> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/llm-analyze`, {
+      method: 'POST',
+    });
+    return handleResponse<LLMAnalysisResult>(response);
+  },
+
+  /**
+   * Return the cached LLM analysis result for a job (from last run).
+   * Returns null when no analysis has been run yet (server returns {available:false}).
+   */
+  async getLlmAnalysis(jobId: string): Promise<LLMAnalysisResult | null> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/llm-analysis`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (data?.available === false) return null;
+    return data as LLMAnalysisResult;
+  },
+
+  /**
+   * Download an Excel (.xlsx) summary of the last LLM analysis result.
+   */
+  async llmAnalysisExportExcel(jobId: string): Promise<{ blob: Blob; filename: string }> {
+    const response = await fetch(
+      `${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/llm-analysis/export-excel`
+    );
+    return handleBlobResponse(response);
+  },
+
+  // ── 3D Preview (OCC B-Rep → STEP → GLB) ─────────────────────────────────
+
+  /**
+   * Check whether a GLB 3D preview is available / can be generated for a job.
+   */
+  async get3dPreviewStatus(jobId: string): Promise<{
+    occ_available: boolean;
+    stack_ready: boolean;
+    step_ready: boolean;
+    glb_ready: boolean;
+    can_generate: boolean;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/3d-preview/status`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Returns the URL for the GLB 3D preview binary (for use with useGLTF / GLTFLoader).
+   * The backend generates the GLB on demand (OCC BRep → STEP → GLB).
+   * @param boreDiameter - inner diameter in inches; when >0 the backend overrides all segment
+   *                       id_diameter values so the GLB renders as a proper hollow part.
+   */
+  get3dPreviewUrl(jobId: string, force = false, boreDiameter?: number): string {
+    const params = new URLSearchParams();
+    if (force) params.set('force', 'true');
+    if (boreDiameter && boreDiameter > 0.001) params.set('bore_diameter', String(boreDiameter));
+    const qs = params.toString();
+    return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/3d-preview${qs ? `?${qs}` : ''}`;
   },
 };
 

@@ -144,6 +144,10 @@ class DimensionDetector:
             logger.warning(f"Error during OCR dimension detection: {e}")
             return []
     
+    # Standard engineering drawing scales (drawing_size : actual_size)
+    STANDARD_SCALES = [0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 4.0, 5.0, 10.0]
+    RENDER_DPI = 300
+
     def find_anchor_dimension(
         self,
         dimensions: List[Dict],
@@ -152,88 +156,92 @@ class DimensionDetector:
         preferred_ranges: Optional[List[Tuple[float, float]]] = None
     ) -> Optional[Dict]:
         """Find the best anchor dimension for scale calibration.
-        
-        Args:
-            dimensions: List of detected dimensions
-            normalized_image: Normalized view image
-            od_data: OD radius data with axial_positions
-            preferred_ranges: List of (min, max) ranges for preferred dimensions
-                Default: [(1.245, 1.255), (1.654, 1.660)] for length and OD
-        
-        Returns:
-            Anchor dimension dict with 'name', 'value', 'pixel_length', 'inch_per_pixel'
-            or None if no suitable anchor found
+
+        Uses DPI-based page dimensions to match ANY OCR dimension to
+        geometry, validating against standard engineering drawing scales.
         """
         if not dimensions:
             return None
-        
-        if preferred_ranges is None:
-            # Default: prefer overall length 1.245-1.255 or OD 1.654-1.660
-            preferred_ranges = [(1.245, 1.255), (1.654, 1.660)]
-        
+
         h, w = normalized_image.shape[:2]
-        
-        # Calculate measured pixel dimensions from the view
-        if not od_data.get("axial_positions"):
+        if od_data.get("axial_positions") is None or len(od_data["axial_positions"]) == 0:
             return None
-        
-        # Overall length in pixels (from first to last axial position)
+
         axial_positions = od_data["axial_positions"]
-        total_length_pixels = axial_positions[-1] - axial_positions[0] if len(axial_positions) > 1 else h * 0.7
-        
-        # Max OD radius in pixels
+        total_length_pixels = (
+            axial_positions[-1] - axial_positions[0]
+            if len(axial_positions) > 1
+            else h * 0.7
+        )
+
         od_radii = od_data.get("od_radii", [])
-        max_od_radius_pixels = np.max(od_radii) if len(od_radii) > 0 else 0.0
+        max_od_radius_pixels = float(np.max(od_radii)) if len(od_radii) > 0 else 0.0
         max_od_diameter_pixels = max_od_radius_pixels * 2.0
-        
-        # Try to match detected dimensions to measured pixel dimensions
+
+        page_inch_per_pixel = 1.0 / self.RENDER_DPI
+
+        page_max_od_in = max_od_diameter_pixels * page_inch_per_pixel
+        page_total_len_in = total_length_pixels * page_inch_per_pixel
+
+        logger.info(
+            f"[ANCHOR] DPI-based page dims: max_OD={page_max_od_in:.3f}\" "
+            f"total_len={page_total_len_in:.3f}\" "
+            f"(OD_px={max_od_diameter_pixels:.0f}, len_px={total_length_pixels:.0f})"
+        )
+
         candidates = []
-        
+
         for dim in dimensions:
-            value = dim['value']
-            unit = dim.get('unit', 'in')
-            
-            if unit != 'in':
+            value = dim.get("value", 0)
+            unit = dim.get("unit", "in")
+            if unit != "in" or value <= 0.05:
                 continue
-            
-            # Check if this matches overall length
-            if len(axial_positions) > 1:
-                # Try matching to overall length
-                for min_val, max_val in preferred_ranges:
-                    if min_val <= value <= max_val:
-                        # This could be the overall length
-                        inch_per_pixel = value / total_length_pixels if total_length_pixels > 0 else None
-                        if inch_per_pixel and 0.0001 < inch_per_pixel < 0.1:  # Reasonable range
-                            candidates.append({
-                                'name': 'overall_length',
-                                'value': value,
-                                'pixel_length': total_length_pixels,
-                                'inch_per_pixel': inch_per_pixel,
-                                'confidence': dim.get('confidence', 0.5),
-                                'dimension': dim
-                            })
-            
-            # Check if this matches max OD diameter
-            if max_od_diameter_pixels > 0:
-                for min_val, max_val in preferred_ranges:
-                    if min_val <= value <= max_val:
-                        # This could be the max OD
-                        inch_per_pixel = value / max_od_diameter_pixels if max_od_diameter_pixels > 0 else None
-                        if inch_per_pixel and 0.0001 < inch_per_pixel < 0.1:  # Reasonable range
-                            candidates.append({
-                                'name': 'max_od_diameter',
-                                'value': value,
-                                'pixel_length': max_od_diameter_pixels,
-                                'inch_per_pixel': inch_per_pixel,
-                                'confidence': dim.get('confidence', 0.5),
-                                'dimension': dim
-                            })
-        
-        # Sort by confidence and return best match
+
+            for geom_name, pixel_span, page_span_in in [
+                ("max_od_diameter", max_od_diameter_pixels, page_max_od_in),
+                ("overall_length", total_length_pixels, page_total_len_in),
+            ]:
+                if pixel_span <= 0:
+                    continue
+
+                implied_scale = page_span_in / value
+                nearest_std = min(
+                    self.STANDARD_SCALES, key=lambda s: abs(s - implied_scale)
+                )
+                scale_err = abs(implied_scale - nearest_std) / nearest_std
+
+                if scale_err > 0.25:
+                    continue
+
+                inch_per_pixel = value / pixel_span
+                if not (0.0001 < inch_per_pixel < 0.1):
+                    continue
+
+                score = dim.get("confidence", 0.5) * (1.0 - scale_err)
+
+                candidates.append({
+                    "name": geom_name,
+                    "value": value,
+                    "pixel_length": pixel_span,
+                    "inch_per_pixel": inch_per_pixel,
+                    "confidence": score,
+                    "implied_drawing_scale": nearest_std,
+                    "scale_error": scale_err,
+                    "dimension": dim,
+                })
+
         if candidates:
-            candidates.sort(key=lambda x: x['confidence'], reverse=True)
-            return candidates[0]
-        
+            candidates.sort(key=lambda x: x["confidence"], reverse=True)
+            best = candidates[0]
+            logger.info(
+                f"[ANCHOR] Best match: {best['name']}={best['value']}\" "
+                f"→ drawing_scale≈{best['implied_drawing_scale']}:1  "
+                f"inch_per_pixel={best['inch_per_pixel']:.6f}  "
+                f"score={best['confidence']:.3f}"
+            )
+            return best
+
+        logger.warning("[ANCHOR] No OCR dimension matched geometry at any standard scale")
         return None
 
 

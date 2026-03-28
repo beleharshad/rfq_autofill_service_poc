@@ -308,8 +308,8 @@ class FeatureDetectionService:
                     except Exception:
                         pass
 
-                # FEATURES_TEXT_ONLY: estimated scale + no CV features
-                if scale_method == "estimated":
+                # FEATURES_TEXT_ONLY: poorly-scaled geometry + no CV features
+                if scale_method not in ("anchor_dimension", "calibrated_from_ocr", "dpi_based"):
                     has_cv = False
                     if cv_file.exists():
                         try:

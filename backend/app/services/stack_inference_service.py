@@ -1,6 +1,7 @@
 """Service for inferring TurnedPartStack from detected turned view."""
 
 import json
+import re
 import cv2
 import numpy as np
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.services.job_service import JobService
 from app.models.job import JobStatus
 from app.models.part_summary import PartSummary
 from app.services.dimension_detector import DimensionDetector
+from app.services.rfq_dimension_classifier import RFQDimensionClassifier
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,12 +35,14 @@ class StackInferenceService:
         self.axial_bin_size = 3  # Pixels per bin for axial sampling (reduced from 5 for finer resolution)
         self.min_segment_length = 3  # Minimum pixels for a segment (reduced from 10 to capture short features)
         self.dimension_detector = DimensionDetector()
+        self.dimension_classifier = RFQDimensionClassifier()
         
-        # Sanity gate thresholds
-        self.min_total_length_inches = 0.8
-        self.max_total_length_inches = 2.0
-        self.min_max_od_inches = 1.0
-        self.max_max_od_inches = 3.0
+        # Sanity gate thresholds (wide enough for DPI-based scaling with
+        # various drawing scales; post-calibration refines further).
+        self.min_total_length_inches = 0.1
+        self.max_total_length_inches = 20.0
+        self.min_max_od_inches = 0.1
+        self.max_max_od_inches = 20.0
     
     def normalize_turned_part_stack_with_confidence(
         self, 
@@ -161,6 +165,7 @@ class StackInferenceService:
                     "original_index": current_indices[0]  # Primary index
                 })
                 i += 2  # Skip next segment since we merged it
+                continue  # ← skip "No merge" block below (already appended)
             else:
                 # Check for similar segment merge
                 if merged_segments and i < len(sorted_segments):
@@ -848,48 +853,96 @@ class StackInferenceService:
         # Step 1: Detect dimensions in the view using OCR
         # Note: page_img is already loaded earlier (line 759), reuse it
         bbox_pixels = best_view["bbox_pixels"]
-        dimensions = self.dimension_detector.detect_dimensions_in_view(
+        raw_dimensions = self.dimension_detector.detect_dimensions_in_view(
             page_img, 
             (bbox_pixels[0], bbox_pixels[1], bbox_pixels[2], bbox_pixels[3])
         )
         
-        # Step 2: Find anchor dimension for scale calibration
+        # Step 1.5: Filter dimensions using RFQ classifier to remove tolerance ranges,
+        # metric brackets, and small features
+        filtered_dimensions = self._filter_dimensions_with_classifier(raw_dimensions)
+        
+        logger.info(f"Detected {len(raw_dimensions)} raw dimensions, {len(filtered_dimensions)} after filtering")
+        
+        # Step 1.8: If EasyOCR on the view crop found few dimensions,
+        # supplement with full-page Tesseract OCR from PDFSpecExtractor.
+        if len(filtered_dimensions) < 3:
+            try:
+                from app.services.pdf_spec_extractor import PDFSpecExtractor
+                pdf_path = self.file_storage.get_inputs_path(job_id) / "source.pdf"
+                if pdf_path.exists():
+                    extractor = PDFSpecExtractor()
+                    full_page_dims = extractor.extract_all_dimension_candidates(str(pdf_path))
+                    supplement_count = 0
+                    for cand in full_page_dims:
+                        val = cand.get("value_in") or cand.get("value")
+                        if val and float(val) > 0.05 and cand.get("unit", "in") == "in":
+                            if not cand.get("is_tolerance"):
+                                filtered_dimensions.append({
+                                    "value": float(val),
+                                    "unit": "in",
+                                    "text": cand.get("text", ""),
+                                    "confidence": min(float(cand.get("confidence", 0.5)), 0.7),
+                                    "source": "tesseract_full_page",
+                                })
+                                supplement_count += 1
+                    if supplement_count:
+                        logger.info(
+                            f"[SCALE] Supplemented with {supplement_count} "
+                            f"Tesseract full-page dimensions "
+                            f"(total now {len(filtered_dimensions)})"
+                        )
+            except Exception as e:
+                logger.warning(f"[SCALE] Full-page OCR supplement failed: {e}")
+
+        # Step 2: Find anchor dimension for scale calibration (using filtered dimensions)
         anchor_dim = self.dimension_detector.find_anchor_dimension(
-            dimensions,
+            filtered_dimensions,
             normalized,
             od_data,
-            preferred_ranges=[(1.245, 1.255), (1.654, 1.660)]  # Prefer overall length or OD in these ranges
         )
         
         # Step 3: Calculate pixel-to-inch conversion
+        RENDER_DPI = 300
+        base_inch_per_pixel = 1.0 / RENDER_DPI
         scale_report = {}
+
         if anchor_dim:
             pixel_to_inch = anchor_dim['inch_per_pixel']
             scale_report = {
                 'method': 'anchor_dimension',
-                'confidence': anchor_dim.get('confidence', 0.9),  # High confidence for anchor dimension
+                'confidence': min(anchor_dim.get('confidence', 0.9), 0.92),
                 'anchor_name': anchor_dim['name'],
                 'anchor_value_inches': anchor_dim['value'],
                 'anchor_pixel_length': anchor_dim['pixel_length'],
                 'inch_per_pixel': pixel_to_inch,
-                'anchor_confidence': anchor_dim.get('confidence', 0.5)
+                'implied_drawing_scale': anchor_dim.get('implied_drawing_scale', 1.0),
+                'render_dpi': RENDER_DPI,
             }
-            logger.info(f"Scale calibrated from anchor dimension: {anchor_dim['name']} = {anchor_dim['value']} in "
-                       f"({anchor_dim['pixel_length']:.1f} px) → {pixel_to_inch:.6f} in/px")
+            logger.info(
+                f"Scale from anchor: {anchor_dim['name']}={anchor_dim['value']}\" "
+                f"({anchor_dim['pixel_length']:.0f} px) → {pixel_to_inch:.6f} in/px  "
+                f"drawing_scale≈{anchor_dim.get('implied_drawing_scale', '?')}:1"
+            )
         else:
-            # Fallback: estimate from image dimensions (less accurate)
-            estimated_part_length_pixels = h * 0.7
-            estimated_part_length_inches = 1.25  # Default assumption for small parts
-            pixel_to_inch = estimated_part_length_inches / estimated_part_length_pixels if estimated_part_length_pixels > 0 else 0.01
+            # DPI-based fallback: we know 1 pixel = 1/300 page-inch.
+            # Estimate drawing scale from OCR dimensions + geometry.
+            drawing_scale = self._estimate_drawing_scale(
+                filtered_dimensions, od_data, base_inch_per_pixel,
+                page_img=page_img,
+            )
+            pixel_to_inch = base_inch_per_pixel / drawing_scale
             scale_report = {
-                'method': 'estimated',
-                'confidence': 0.5,  # Lower confidence for estimated scale
-                'estimated_part_length_pixels': estimated_part_length_pixels,
-                'estimated_part_length_inches': estimated_part_length_inches,
+                'method': 'dpi_based',
+                'confidence': 0.70 if drawing_scale != 1.0 else 0.55,
+                'render_dpi': RENDER_DPI,
+                'detected_drawing_scale': drawing_scale,
                 'inch_per_pixel': pixel_to_inch,
-                'warning': 'No anchor dimension found, using estimated scale'
             }
-            logger.warning(f"No anchor dimension found, using estimated scale: {pixel_to_inch:.6f} in/px")
+            logger.info(
+                f"DPI-based scale: drawing_scale={drawing_scale}:1 → "
+                f"pixel_to_inch={pixel_to_inch:.6f}"
+            )
         
         # Save scale report
         scale_report_file = debug_dir / "scale_report.json"
@@ -1258,7 +1311,7 @@ class StackInferenceService:
             "source_view": {
                 "page": best_view["page"],
                 "view_index": best_view.get("view_index", 0),
-                "view_conf": best_view["scores"]["view_conf"]
+                "view_conf": (best_view.get("scores") or {}).get("view_conf", 0.0)
             },
             "segments": normalized_segments,
             "overall_confidence": float(overall_confidence),
@@ -1340,4 +1393,282 @@ class StackInferenceService:
             "scale_report": scale_report,  # Include scale calibration info
             "outputs": ["inferred_stack.json", "part_summary.json", "scale_report.json"]
         }
+    
+    # Standard drawing scales used by _estimate_drawing_scale
+    STANDARD_SCALES = [0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 4.0, 5.0, 10.0]
+
+    # Regex patterns for SCALE annotations in title blocks
+    _SCALE_TEXT_RE = re.compile(
+        r'(?:SCALE|SC\.?|DRAWN\s+SCALE)\s*[:=]?\s*'
+        r'(\d+)\s*[:/-]\s*(\d+)',
+        re.IGNORECASE,
+    )
+
+    def _detect_scale_from_title_block(self, page_img: np.ndarray) -> Optional[float]:
+        """Try to OCR the SCALE text from the bottom-right title block area."""
+        if self.dimension_detector.easyocr_reader is None:
+            return None
+        h, w = page_img.shape[:2]
+        # Title block is typically in the bottom-right ~25% of the page
+        y0 = int(h * 0.75)
+        x0 = int(w * 0.50)
+        title_crop = page_img[y0:h, x0:w]
+        if title_crop.size == 0:
+            return None
+        try:
+            results = self.dimension_detector.easyocr_reader.readtext(title_crop)
+            for (_bbox, text, _conf) in results:
+                m = self._SCALE_TEXT_RE.search(text)
+                if m:
+                    drawing_part = float(m.group(1))
+                    actual_part = float(m.group(2))
+                    if actual_part > 0 and drawing_part > 0:
+                        ratio = drawing_part / actual_part
+                        logger.info(
+                            f"[DRAW_SCALE] title block OCR: '{text}' "
+                            f"→ SCALE {drawing_part}:{actual_part} = {ratio}"
+                        )
+                        return ratio
+        except Exception as e:
+            logger.warning(f"[DRAW_SCALE] title block OCR failed: {e}")
+        return None
+
+    def _estimate_drawing_scale(
+        self,
+        dimensions: List[Dict],
+        od_data: Dict,
+        base_inch_per_pixel: float,
+        page_img: Optional[np.ndarray] = None,
+    ) -> float:
+        """Estimate the drawing scale ratio from OCR dimensions and geometry.
+
+        Strategy (in priority order):
+        1. OCR the SCALE text from the title block (most reliable).
+        2. Use OCR dimension values + DPI-based page measurements to vote
+           on the most likely standard scale.
+        3. Fall back to 1.0 (full-size).
+        """
+        # --- Strategy 1: title block SCALE text ---
+        if page_img is not None:
+            title_scale = self._detect_scale_from_title_block(page_img)
+            if title_scale is not None:
+                return title_scale
+
+        # --- Strategy 2: vote from OCR dims vs DPI page dims ---
+        axial_positions = od_data.get("axial_positions", [])
+        od_radii = od_data.get("od_radii", [])
+        if len(axial_positions) == 0 or len(od_radii) == 0:
+            return 1.0
+
+        total_length_px = (
+            axial_positions[-1] - axial_positions[0]
+            if len(axial_positions) > 1
+            else 0
+        )
+        max_od_diameter_px = float(np.max(od_radii)) * 2.0
+
+        page_len_in = total_length_px * base_inch_per_pixel
+        page_od_in = max_od_diameter_px * base_inch_per_pixel
+
+        logger.info(
+            f"[DRAW_SCALE] page dims: OD={page_od_in:.3f}\" len={page_len_in:.3f}\""
+        )
+
+        votes: List[float] = []
+
+        for dim in dimensions:
+            value = dim.get("value", 0)
+            if dim.get("unit", "in") != "in" or value <= 0.05:
+                continue
+
+            for geom_name, page_in in [("OD", page_od_in), ("LEN", page_len_in)]:
+                if page_in <= 0:
+                    continue
+                implied = page_in / value
+                nearest = min(self.STANDARD_SCALES, key=lambda s: abs(s - implied))
+                err = abs(implied - nearest) / nearest
+                if err < 0.25:
+                    votes.append(nearest)
+                    logger.debug(
+                        f"[DRAW_SCALE] OCR {value:.3f} vs {geom_name} "
+                        f"→ implied={implied:.2f} ≈ {nearest}:1 (err={err:.2%})"
+                    )
+
+        if not votes:
+            logger.info("[DRAW_SCALE] No scale votes, defaulting to 1:1")
+            return 1.0
+
+        from collections import Counter
+        scale_counts = Counter(votes)
+        best_scale, best_count = scale_counts.most_common(1)[0]
+        logger.info(
+            f"[DRAW_SCALE] votes={dict(scale_counts)} → "
+            f"best={best_scale}:1 ({best_count} votes)"
+        )
+        return best_scale
+
+    def _filter_dimensions_with_classifier(self, dimensions: List[Dict]) -> List[Dict]:
+        """
+        Filter dimensions using RFQ classifier rules to remove tolerance ranges,
+        metric brackets, and small features.
+        
+        Args:
+            dimensions: List of detected dimensions from OCR
+            
+        Returns:
+            Filtered list of dimensions
+        """
+        if not dimensions:
+            return []
+        
+        import re
+        
+        # Convert dimensions to classifier format and filter
+        filtered_dimensions = []
+        
+        for dim in dimensions:
+            value = dim.get('value')
+            if value is None:
+                continue
+            
+            text = dim.get('text', '')
+            position = dim.get('position')
+            confidence = dim.get('confidence', 0.5)
+            
+            # Rule 1: Ignore metric bracket values [mm]
+            if '[' in text and ']' in text:
+                bracket_pattern = re.compile(r'\[[\d.]+\]')
+                if bracket_pattern.search(text):
+                    logger.debug(f"Filtering out metric bracket dimension: {text} (value: {value})")
+                    continue
+            
+            # Rule 2: Ignore tolerance ranges (e.g., 0.723-0.727, 1.006-1.008, .185-.190)
+            tolerance_pattern = re.compile(r'\d+\.\d+\s*[-–]\s*\d+\.\d+|\.\d+\s*[-–]\s*\.\d+')
+            if tolerance_pattern.search(text):
+                logger.debug(f"Filtering out tolerance range dimension: {text} (value: {value})")
+                continue
+            
+            # Determine if this is a diameter (OD/ID) or length dimension
+            is_diameter = any(sym in text for sym in ['Ø', '∅', 'DIA', 'DIAMETER'])
+            
+            # Rule 3: For diameters (OD/ID), check valid range: 0.25-5.0 inches
+            if is_diameter:
+                if not (0.25 <= value <= 5.0):
+                    logger.debug(f"Filtering out diameter dimension outside range: {value} in ({text})")
+                    continue
+            
+            # Rule 4: For lengths, check valid range: >= 0.3 inches (not small shoulder)
+            if not is_diameter:
+                if value < 0.3:
+                    logger.debug(f"Filtering out small shoulder dimension: {value} in ({text})")
+                    continue
+                if value > 20.0:
+                    logger.debug(f"Filtering out oversized length dimension: {value} in ({text})")
+                    continue
+            
+            # Passed all filters - keep this dimension
+            filtered_dimensions.append({
+                'value': value,
+                'unit': dim.get('unit', 'in'),
+                'text': text,
+                'position': position,
+                'confidence': confidence
+            })
+        
+        logger.info(f"Dimension filtering: {len(dimensions)} raw → {len(filtered_dimensions)} filtered")
+        
+        return filtered_dimensions
+    
+    def _filter_dimensions_with_classifier(self, dimensions: List[Dict]) -> List[Dict]:
+        """
+        Filter dimensions using RFQ classifier to remove tolerance ranges,
+        metric brackets, and small features.
+        
+        Args:
+            dimensions: List of detected dimensions from OCR
+            
+        Returns:
+            Filtered list of dimensions
+        """
+        if not dimensions:
+            return []
+        
+        # Convert dimensions to classifier format
+        dimension_candidates = []
+        for dim in dimensions:
+            value = dim.get('value')
+            if value is None:
+                continue
+            
+            text = dim.get('text', '')
+            position = dim.get('position')
+            confidence = dim.get('confidence', 0.5)
+            
+            # Determine orientation (diameters are typically vertical, lengths horizontal)
+            # This is a heuristic - in practice, we'd need more context
+            orientation = 'vertical' if any(sym in text for sym in ['Ø', '∅', 'DIA', 'DIAMETER']) else 'horizontal'
+            
+            dimension_candidates.append({
+                'value': float(value),
+                'text': text,
+                'orientation': orientation,
+                'position': position,
+                'confidence': confidence,
+                'segment_length': 0.0  # Will be updated if segments available
+            })
+        
+        # Use classifier to filter
+        filtered_candidates = []
+        
+        for cand in dimension_candidates:
+            # Rule 1: Ignore metric bracket values
+            text = cand.get('text', '')
+            if '[' in text and ']' in text:
+                # Check if value is inside brackets
+                import re
+                bracket_pattern = re.compile(r'\[[\d.]+\]')
+                if bracket_pattern.search(text):
+                    logger.debug(f"Filtering out metric bracket dimension: {text}")
+                    continue
+            
+            # Rule 2: Ignore tolerance ranges
+            tolerance_pattern = re.compile(r'\d+\.\d+\s*[-–]\s*\d+\.\d+|\.\d+\s*[-–]\s*\.\d+')
+            if tolerance_pattern.search(text):
+                logger.debug(f"Filtering out tolerance range dimension: {text}")
+                continue
+            
+            # Rule 3: Check value ranges
+            value = cand.get('value', 0.0)
+            orientation = cand.get('orientation', 'unknown')
+            
+            # For diameters (OD/ID): must be 0.25-5.0 inches
+            if orientation == 'vertical' or any(sym in text for sym in ['Ø', '∅', 'DIA']):
+                if not (0.25 <= value <= 5.0):
+                    logger.debug(f"Filtering out diameter dimension outside range: {value} in ({text})")
+                    continue
+            
+            # For lengths: must be >= 0.3 inches (not small shoulder)
+            if orientation == 'horizontal':
+                if value < 0.3:
+                    logger.debug(f"Filtering out small shoulder dimension: {value} in ({text})")
+                    continue
+                if value > 20.0:
+                    logger.debug(f"Filtering out oversized length dimension: {value} in ({text})")
+                    continue
+            
+            # Passed all filters
+            filtered_candidates.append(cand)
+        
+        # Convert back to original format
+        filtered_dimensions = []
+        for cand in filtered_candidates:
+            filtered_dimensions.append({
+                'value': cand['value'],
+                'unit': 'in',
+                'text': cand['text'],
+                'position': cand.get('position'),
+                'confidence': cand.get('confidence', 0.5)
+            })
+        
+        return filtered_dimensions
 

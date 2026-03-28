@@ -231,6 +231,8 @@ export interface RFQAutofillRequest {
     special_process_cost?: number | null;
     material_density_kg_m3?: number;
   } | null;
+  /** LLM-extracted or user-supplied dimension overrides — bypass geometry-computed values */
+  dimension_overrides?: Record<string, number>;
 }
 
 export interface RFQAutofillEstimate {
@@ -328,4 +330,52 @@ export interface RFQVendorQuoteExtractResponse {
   fields: Record<string, RFQVendorQuoteExtractField>;
   pdf_hint?: Record<string, RFQVendorQuoteExtractField>;
   debug: Record<string, any>;
+}
+
+// ---- LLM Two-Agent Pipeline ----
+
+export interface LLMExtractedSpecs {
+  part_number: string | null;
+  part_name: string | null;
+  material: string | null;
+  quantity: number | null;
+  od_in: number | null;
+  max_od_in: number | null;
+  id_in: number | null;
+  max_id_in: number | null;
+  length_in: number | null;
+  max_length_in: number | null;
+  tolerance_od: string | null;
+  tolerance_id: string | null;
+  tolerance_length: string | null;
+  finish: string | null;
+  revision: string | null;
+}
+
+export interface LLMValidationField {
+  value: number | string | null;
+  confidence: number;
+  issue: string | null;
+}
+
+export interface LLMValidationReport {
+  fields: Record<string, LLMValidationField>;
+  cross_checks: string[];
+  overall_confidence: number;
+  recommendation: 'ACCEPT' | 'REVIEW' | 'REJECT';
+}
+
+export interface LLMAnalysisResult {
+  available?: boolean;
+  /** True while the background LLM thread is still running. Poll until false/absent. */
+  pending?: boolean;
+  /** Set when the pipeline failed (rate limit or other error). */
+  error?: string | null;
+  error_type?: 'rate_limit' | 'pipeline_error' | null;
+  rate_limit_info?: Record<string, unknown> | null;
+  pdf_text_length?: number;
+  extracted: LLMExtractedSpecs;
+  validation: LLMValidationReport;
+  code_issues: string[];
+  valid: boolean;
 }

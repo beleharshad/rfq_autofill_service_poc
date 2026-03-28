@@ -7,7 +7,7 @@ type JobMode = 'assisted_manual' | 'auto_convert';
 
 function NewJobPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<JobMode>('assisted_manual');
+  const [mode, setMode] = useState<JobMode>('auto_convert');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [files, setFiles] = useState<File[]>([]);

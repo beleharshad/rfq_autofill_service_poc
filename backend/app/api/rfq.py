@@ -1,6 +1,7 @@
 """RFQ endpoints."""
 
 import json
+import logging
 from json import JSONDecodeError
 from datetime import datetime
 from pathlib import Path
@@ -9,12 +10,16 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+logger = logging.getLogger(__name__)
+
 from app.models.rfq_autofill import RFQAutofillRequest, RFQAutofillResponse
 from app.services.rfq_autofill_service import RFQAutofillService
-from app.services.rfq_excel_export_service import write_autofill_to_rfq_template
+from app.services.rfq_excel_export_service import write_autofill_to_rfq_template, write_autofill_to_master_file
 from app.services.pdf_spec_extractor import PDFSpecExtractor
 from app.services.vendor_quote_extraction_service import VendorQuoteExtractionService
+from app.services.currency_service import get_live_exchange_rate, get_all_rates_for_currency
 from app.storage.file_storage import FileStorage
+from app.services.rfq_excel_export_service import write_autofill_to_rfq_template, write_autofill_to_master_file
 
 router = APIRouter(prefix="/api/v1/rfq", tags=["rfq"])
 
@@ -95,20 +100,254 @@ async def rfq_autofill(
     else:
         raise HTTPException(status_code=400, detail="Either source.part_summary or source.job_id is required")
 
-    service = RFQAutofillService()
-    result = service.autofill(
-        part_no=part_no_original,
-        part_summary_dict=part_summary,
-        tolerances=request.tolerances.dict(),
-        job_id=request.source.job_id,
-        step_metrics=request.source.step_metrics,
-        mode=request.mode,
-        cost_inputs=(request.cost_inputs.model_dump() if request.cost_inputs is not None else None),
-        vendor_quote_mode=request.vendor_quote_mode,
+    # Auto-populate metadata from job if not provided
+    cost_inputs_dict = request.cost_inputs.model_dump() if request.cost_inputs is not None else None
+    if cost_inputs_dict and request.source.job_id:
+        job_id = request.source.job_id
+        job_inputs_path = Path("data/jobs") / job_id / "inputs"
+        pdf_path = None
+        
+        # Find PDF file and extract drawing number from filename
+        try:
+            if job_inputs_path.exists():
+                for f in job_inputs_path.iterdir():
+                    if f.suffix.lower() == ".pdf" and f.name != "source.pdf":
+                        pdf_path = f
+                        stem = f.stem  # e.g., "060dm0022_B"
+                        
+                        # Extract part revision from filename (e.g., _B from 060dm0022_B.pdf)
+                        revision = None
+                        drawing_num = stem
+                        if len(stem) > 2 and stem[-2] == "_" and stem[-1].isalpha():
+                            revision = stem[-1].upper()
+                            drawing_num = stem[:-2]  # Remove _B suffix -> "060dm0022"
+                        
+                        # Drawing Number = Part Number (without revision suffix)
+                        if not cost_inputs_dict.get("drawing_number"):
+                            cost_inputs_dict["drawing_number"] = drawing_num
+                        
+                        if not cost_inputs_dict.get("part_revision") and revision:
+                            cost_inputs_dict["part_revision"] = revision
+                        break
+        except Exception as e:
+            print(f"[RFQ Autofill] Warning: Could not extract drawing number: {e}")
+        
+        # Extract metadata from PDF text using PDFSpecExtractor
+        if pdf_path and pdf_path.exists():
+            try:
+                extractor = PDFSpecExtractor()
+                pdf_specs = extractor.extract_from_file(str(pdf_path))
+                
+                # Auto-fill from PDF extraction if not already provided by user
+                if pdf_specs.get("success"):
+                    specs = pdf_specs.get("specs", pdf_specs.get("extracted_specs", {}))
+                    
+                    if not cost_inputs_dict.get("part_name") and specs.get("part_name"):
+                        cost_inputs_dict["part_name"] = specs["part_name"]
+                    
+                    if not cost_inputs_dict.get("material_grade") and specs.get("material_grade"):
+                        cost_inputs_dict["material_grade"] = specs["material_grade"]
+                    
+                    if not cost_inputs_dict.get("material_spec") and specs.get("material_spec"):
+                        cost_inputs_dict["material_spec"] = specs["material_spec"]
+                    
+                    if not cost_inputs_dict.get("part_revision") and specs.get("revision"):
+                        cost_inputs_dict["part_revision"] = specs["revision"]
+                    
+                    print(f"[RFQ Autofill] PDF extraction: part_name={specs.get('part_name')}, material={specs.get('material_grade')}")
+            except Exception as e:
+                print(f"[RFQ Autofill] Warning: PDF metadata extraction failed: {e}")
+        
+        # Set default Part Type based on mode (turned parts)
+        if not cost_inputs_dict.get("part_type"):
+            cost_inputs_dict["part_type"] = "Turned"
+        
+        # Set default RFQ Status
+        if not cost_inputs_dict.get("rfq_status"):
+            cost_inputs_dict["rfq_status"] = "Open"
+
+    # Identify the EXACT part_summary object that will be used for autofill computation
+    part_summary_used = part_summary
+    
+    # ── BUG-A FIX: Populate raw_dimensions from PDF if missing ──────────────
+    # Calibration + machining features depend on inference_metadata.raw_dimensions.
+    # The client rarely sends OCR dims, so we extract them server-side once, up front.
+    job_id = request.source.job_id
+    raw_dims_populated = 0
+    if job_id:
+        meta = part_summary_used.get("inference_metadata")
+        if meta is None:
+            meta = {}
+            part_summary_used["inference_metadata"] = meta
+        existing_raw = meta.get("raw_dimensions") or []
+        if not existing_raw:
+            try:
+                extractor = PDFSpecExtractor()
+                fs = FileStorage()
+                job_inputs = fs.get_inputs_path(job_id)
+                if job_inputs.exists():
+                    pdf_files = [f for f in job_inputs.iterdir() if f.suffix.lower() == ".pdf"]
+                    if pdf_files:
+                        all_candidates = extractor.extract_all_dimension_candidates(str(pdf_files[0]))
+                        if all_candidates:
+                            meta["raw_dimensions"] = all_candidates
+                            raw_dims_populated = len(all_candidates)
+                            logger.info(f"[RFQ_AUTOFILL] Populated raw_dimensions from PDF text scrape: {raw_dims_populated} candidates")
+                            for c in all_candidates[:10]:
+                                logger.info(f"  {c['kind']} val={c['value_in']} conf={c['confidence']} tol={c.get('is_tolerance')} text={c['text'][:60]}")
+            except Exception as e:
+                logger.warning(f"[RFQ_AUTOFILL] Failed to populate raw_dimensions from PDF: {e}")
+    
+    logger.info(f"[RFQ_AUTOFILL] raw_dimensions_count={len((part_summary_used.get('inference_metadata') or {}).get('raw_dimensions') or [])} (populated_from_pdf={raw_dims_populated})")
+    
+    # ── Pre-compute OCR finish dims so calibration can use them ─────────────
+    from app.services.ocr_finish_selector import select_finish_dims_from_ocr
+    pre_ocr = select_finish_dims_from_ocr(part_summary_used) if part_summary_used else None
+    pre_ocr_od = None
+    if pre_ocr and pre_ocr.get("finish_od_in") is not None:
+        pre_ocr_od = pre_ocr["finish_od_in"]
+        inference_meta = part_summary_used.setdefault("inference_metadata", {})
+        existing_diams = inference_meta.get("ocr_diameters_in") or []
+        if not any(abs(d.get("value", 0) - pre_ocr_od) < 0.002 for d in existing_diams if isinstance(d, dict)):
+            existing_diams.append({"value": pre_ocr_od, "text": f"OCR finish OD {pre_ocr_od}", "confidence": 0.90})
+            inference_meta["ocr_diameters_in"] = existing_diams
+            logger.info(f"[RFQ_AUTOFILL] Injected OCR finish OD={pre_ocr_od:.4f} into calibration candidates")
+        pre_ocr_id = pre_ocr.get("finish_id_in")
+        if pre_ocr_id:
+            if not any(abs(d.get("value", 0) - pre_ocr_id) < 0.002 for d in existing_diams if isinstance(d, dict)):
+                existing_diams.append({"value": pre_ocr_id, "text": f"OCR finish ID {pre_ocr_id}", "confidence": 0.85})
+                inference_meta["ocr_diameters_in"] = existing_diams
+                logger.info(f"[RFQ_AUTOFILL] Injected OCR finish ID={pre_ocr_id:.4f} into calibration candidates")
+
+    # ── Run geometry scale calibration ──────────────────────────────────────
+    from app.services.geometry_scale_calibration import GeometryScaleCalibrationService
+    
+    calibration_service = GeometryScaleCalibrationService()
+    calibrated_summary = None
+    scale_factor = None
+    calibration_confidence = 0.0
+    ratios = []
+    
+    try:
+        calibrated_summary, scale_factor, calibration_confidence, ratios = \
+            calibration_service.calibrate_geometry_scale(part_summary_used, job_id=job_id)
+    except Exception as e:
+        import traceback
+        logger.error(f"[RFQ_AUTOFILL] Calibration error: {e}\n{traceback.format_exc()}")
+    
+    if ratios is None:
+        ratios = []
+    
+    # Extract calibration debug info from calibrated_summary
+    scale_calibration_applied = False
+    matched_pairs_count = 0
+    scaled_xy_flag = False
+    scaled_z_flag = False
+    
+    # Initialize ratios list if not provided
+    if ratios is None:
+        ratios = []
+    
+    if calibrated_summary is not None:
+        scale_report_after = calibrated_summary.get("scale_report", {})
+        if isinstance(scale_report_after, dict):
+            scale_method_after = scale_report_after.get("method", "")
+            # Calibration was applied if method is "calibrated_from_ocr" OR scale_factor is not None
+            scale_calibration_applied = (
+                scale_method_after == "calibrated_from_ocr" or 
+                scale_factor is not None
+            )
+            
+            if scale_calibration_applied:
+                # CRITICAL: Replace part_summary_used with calibrated version
+                part_summary_used = calibrated_summary
+                
+                scaled_xy_flag = scale_report_after.get("scaled_xy", False)
+                scaled_z_flag = scale_report_after.get("scaled_z", False)
+                matched_pairs_count = scale_report_after.get("matched_pairs_count", len(ratios) if ratios else 0)
+    
+    # If calibration didn't apply, use original counts
+    if not scale_calibration_applied:
+        matched_pairs_count = len(ratios) if ratios else 0
+    
+    # Definitive log line right before autofill calculation
+    raw_dims_count = len((part_summary_used.get("inference_metadata") or {}).get("raw_dimensions") or [])
+    scale_method_final = part_summary_used.get("scale_report", {}).get("method", "unknown") if isinstance(part_summary_used.get("scale_report"), dict) else "unknown"
+    scale_factor_str = f"{scale_factor:.4f}" if scale_factor is not None else "None"
+    logger.info(f"[RFQ_AUTOFILL] raw_dimensions_count={raw_dims_count} calibration_applied={scale_calibration_applied} scale_factor={scale_factor_str} matched_pairs={matched_pairs_count}")
+
+    # ── RFQ_DIMENSION_TRACE: Geometry Scale Calibration ──────────────────
+    _T = "[RFQ_DIMENSION_TRACE]"
+    logger.info(
+        f"{_T}[SCALE_CALIBRATION] "
+        f"scale_method={scale_method_final} "
+        f"scale_factor={scale_factor_str} "
+        f"matched_pairs={matched_pairs_count} "
+        f"xy_scaled={scaled_xy_flag} "
+        f"z_scaled={scaled_z_flag} "
+        f"calibration_confidence={calibration_confidence}"
     )
+    if ratios:
+        for _ri, _ratio in enumerate(ratios):
+            if isinstance(_ratio, dict):
+                logger.info(
+                    f"{_T}[SCALE_MATCH] "
+                    f"ocr={_ratio.get('ocr_value', 'N/A')} "
+                    f"geometry={_ratio.get('geometry_value', 'N/A')} "
+                    f"ratio={_ratio.get('ratio', 'N/A')}"
+                )
+            elif isinstance(_ratio, (int, float)):
+                logger.info(f"{_T}[SCALE_MATCH] ratio_value={_ratio}")
+            else:
+                logger.info(f"{_T}[SCALE_MATCH] raw={_ratio}")
+    else:
+        logger.info(f"{_T}[SCALE_MATCH] no_matching_pairs_found")
+
+    service = RFQAutofillService()
+    try:
+        # CRITICAL: Pass part_summary_used (which is calibrated if calibration succeeded)
+        result = service.autofill(
+            part_no=part_no_original,
+            part_summary_dict=part_summary_used,  # Use calibrated part_summary if calibration applied
+            tolerances=request.tolerances.model_dump(),
+            job_id=request.source.job_id,
+            step_metrics=request.source.step_metrics,
+            mode=request.mode,
+            cost_inputs=cost_inputs_dict,
+            vendor_quote_mode=request.vendor_quote_mode,
+        )
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"RFQ autofill error: {e}\n{error_details}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"RFQ autofill failed: {str(e)}. Check server logs for details."
+        )
+    
+    # CRITICAL: Update response debug fields from calibration results
+    try:
+        result.debug.scale_calibration_applied = scale_calibration_applied
+        result.debug.scale_factor_used = scale_factor if scale_calibration_applied else None
+        result.debug.matched_pairs = matched_pairs_count
+        result.debug.scaled_xy = scaled_xy_flag if scale_calibration_applied else None
+        result.debug.scaled_z = scaled_z_flag if scale_calibration_applied else None
+    except Exception as e:
+        logger.warning(f"[RFQ_AUTOFILL] Failed to update debug fields: {e}")
+        # Debug fields are optional, continue without them
+    
+    # Extract machining features (pure in-memory, no I/O — safe to call directly)
+    try:
+        from app.services.machining_feature_extractor import extract_machining_features
+        machining_features = extract_machining_features(part_summary_used)
+        result.debug.machining_features = machining_features
+        logger.info(f"[RFQ_AUTOFILL] machining_features: status={machining_features.get('status')}, od={machining_features.get('main_turning_od_in')}, id={machining_features.get('main_bore_id_in')}, len={machining_features.get('main_turning_len_in')}")
+    except Exception as e:
+        logger.warning(f"[RFQ_AUTOFILL] machining_features error: {e}")
+        result.debug.machining_features = {"status": "ERROR", "error": str(e)}
     
     # Auto-export Excel if enabled and cost_inputs provided
-    if auto_export and request.cost_inputs is not None:
+    if auto_export and cost_inputs_dict is not None:
         try:
             template_path = Path("data") / "rfq_estimation" / template_filename
             if template_path.exists():
@@ -124,14 +363,22 @@ async def rfq_autofill(
                     output_path=out_path,
                     part_no=part_no_original,
                     autofill_response=result.model_dump(),
-                    cost_inputs=request.cost_inputs.model_dump(),
+                    cost_inputs=cost_inputs_dict,  # Use dict with auto-extracted metadata
                     sheet_name="RFQ Details",
                 )
                 print(f"[RFQ Autofill] Auto-exported Excel to: {out_path}")
         except Exception as e:
             # Don't fail the autofill request if export fails
             print(f"[RFQ Autofill] Warning: Auto-export failed: {e}")
-    
+
+    # ── RFQ_DIMENSION_TRACE: API Output ────────────────────────────────
+    try:
+        import json as _json
+        _api_output = result.model_dump()
+        logger.info(f"{_T}[API_OUTPUT] {_json.dumps(_api_output, indent=2, default=str)}")
+    except Exception as _trace_err:
+        logger.info(f"{_T}[API_OUTPUT] error_serializing_response: {_trace_err}")
+
     return result
 
 
@@ -176,11 +423,17 @@ async def rfq_export_xlsx(
     request: RFQAutofillRequest,
     template_filename: str = "RFQ-2025-01369 - R1.custom.xlsx",
     template_path: Optional[str] = None,
+    export_mode: str = "master",  # "master", "new_file", or "copy"
+    custom_filename: Optional[str] = None,  # For new_file mode: user-specified filename
 ):
-    """Create a NEW filled RFQ Excel file (copy of template) for the given part_no.
-
-    - Never modifies the template in-place.
-    - Writes only the key dimension/estimate columns.
+    """Export RFQ data to Excel.
+    
+    Three modes:
+    - export_mode="master" (default): Updates a single master file. If Part No exists, updates that row.
+      New Part Nos are appended. Each row gets a timestamp. Saves disk space.
+    - export_mode="new_file": Creates a NEW Excel file from template (empty except this part).
+      User can specify custom_filename or it will be auto-generated.
+    - export_mode="copy": Creates a new timestamped copy for each export (legacy behavior).
     """
     if not request.part_no or not request.part_no.strip():
         raise HTTPException(status_code=400, detail="part_no is required")
@@ -197,6 +450,69 @@ async def rfq_export_xlsx(
     else:
         raise HTTPException(status_code=400, detail="Either source.part_summary or source.job_id is required")
 
+    # Auto-populate metadata from job if not provided (same logic as /autofill)
+    cost_inputs_dict = request.cost_inputs.model_dump() if request.cost_inputs is not None else None
+    if cost_inputs_dict and request.source.job_id:
+        job_id = request.source.job_id
+        job_inputs_path = Path("data/jobs") / job_id / "inputs"
+        pdf_path = None
+        
+        # Find PDF file and extract drawing number from filename
+        try:
+            if job_inputs_path.exists():
+                for f in job_inputs_path.iterdir():
+                    if f.suffix.lower() == ".pdf" and f.name != "source.pdf":
+                        pdf_path = f
+                        stem = f.stem  # e.g., "060dm0022_B"
+                        
+                        # Extract part revision from filename (e.g., _B from 060dm0022_B.pdf)
+                        revision = None
+                        drawing_num = stem
+                        if len(stem) > 2 and stem[-2] == "_" and stem[-1].isalpha():
+                            revision = stem[-1].upper()
+                            drawing_num = stem[:-2]  # Remove _B suffix -> "060dm0022"
+                        
+                        # Drawing Number = Part Number (without revision suffix)
+                        if not cost_inputs_dict.get("drawing_number"):
+                            cost_inputs_dict["drawing_number"] = drawing_num
+                        
+                        if not cost_inputs_dict.get("part_revision") and revision:
+                            cost_inputs_dict["part_revision"] = revision
+                        break
+        except Exception as e:
+            print(f"[RFQ Export] Warning: Could not extract drawing number: {e}")
+        
+        # Extract metadata from PDF text using OCR
+        if pdf_path and pdf_path.exists():
+            try:
+                extractor = PDFSpecExtractor()
+                pdf_specs = extractor.extract_from_file(str(pdf_path))
+                
+                if pdf_specs.get("success"):
+                    specs = pdf_specs.get("specs", pdf_specs.get("extracted_specs", {}))
+                    
+                    if not cost_inputs_dict.get("part_name") and specs.get("part_name"):
+                        cost_inputs_dict["part_name"] = specs["part_name"]
+                    
+                    if not cost_inputs_dict.get("material_grade") and specs.get("material_grade"):
+                        cost_inputs_dict["material_grade"] = specs["material_grade"]
+                    
+                    if not cost_inputs_dict.get("material_spec") and specs.get("material_spec"):
+                        cost_inputs_dict["material_spec"] = specs["material_spec"]
+                    
+                    if not cost_inputs_dict.get("part_revision") and specs.get("revision"):
+                        cost_inputs_dict["part_revision"] = specs["revision"]
+                    
+                    print(f"[RFQ Export] PDF extraction: part_name={specs.get('part_name')}, material={specs.get('material_grade')}")
+            except Exception as e:
+                print(f"[RFQ Export] Warning: PDF metadata extraction failed: {e}")
+        
+        # Set defaults
+        if not cost_inputs_dict.get("part_type"):
+            cost_inputs_dict["part_type"] = "Turned"
+        if not cost_inputs_dict.get("rfq_status"):
+            cost_inputs_dict["rfq_status"] = "Open"
+
     service = RFQAutofillService()
     resp = service.autofill(
         part_no=part_no_original,
@@ -204,9 +520,23 @@ async def rfq_export_xlsx(
         tolerances=request.tolerances.model_dump(),
         step_metrics=request.source.step_metrics,
         mode=request.mode,
-        cost_inputs=(request.cost_inputs.model_dump() if request.cost_inputs is not None else None),
+        cost_inputs=cost_inputs_dict,
         vendor_quote_mode=request.vendor_quote_mode,
     )
+
+    # Apply LLM / user dimension overrides so Excel uses the correct extracted values
+    # rather than the geometry-computed fallback values.
+    resp_dict = resp.model_dump()
+    if request.dimension_overrides:
+        _dim_fields = ("finish_od_in", "finish_id_in", "finish_len_in", "rm_od_in", "rm_id_in", "rm_len_in")
+        for key, val in request.dimension_overrides.items():
+            if key in _dim_fields and val is not None:
+                try:
+                    resp_dict["fields"][key]["value"] = float(val)
+                    resp_dict["fields"][key]["source"] = "llm_override"
+                except (KeyError, TypeError):
+                    pass  # field not present — skip
+        print(f"[RFQ Export] Applied dimension_overrides: {request.dimension_overrides}")
 
     # Template can be an explicit path or a filename under backend/data/rfq_estimation/
     if template_path:
@@ -216,28 +546,91 @@ async def rfq_export_xlsx(
     if not template_path.exists():
         raise HTTPException(status_code=404, detail=f"Template not found: {template_path}")
 
-    now = datetime.utcnow()
-    date_tag = now.strftime("%d-%b%Y")  # e.g. 12-Jan2026
-    time_tag = now.strftime("%H%M%S")  # timestamp
     safe_rfq = "".join(ch for ch in str(request.rfq_id) if ch.isalnum() or ch in ("-", "_")).strip() or "RFQ"
-    out_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
-    out_path = out_dir / f"autofill_{safe_rfq}_{date_tag}_{time_tag}.xlsx"
-
+    now = datetime.utcnow()
+    
     try:
-        write_autofill_to_rfq_template(
-            template_path=template_path,
-            output_path=out_path,
-            part_no=part_no_original,
-            autofill_response=resp.model_dump(),
-            cost_inputs=(request.cost_inputs.model_dump() if request.cost_inputs is not None else None),
-            sheet_name="RFQ Details",
-        )
+        if export_mode == "master":
+            # MASTER FILE MODE: Single file, update/append rows
+            master_dir = Path("data") / "rfq_estimation" / "master"
+            master_filename = "RFQ-Master-2025.xlsx"
+            master_path = master_dir / master_filename
+            
+            result = write_autofill_to_master_file(
+                master_path=master_path,
+                template_path=template_path,
+                part_no=part_no_original,
+                autofill_response=resp_dict,
+                cost_inputs=cost_inputs_dict,
+                sheet_name="RFQ Details",
+            )
+            out_path = result.output_path
+            
+        elif export_mode == "new_file":
+            # NEW FILE MODE: Create fresh Excel or update existing custom file
+            if custom_filename:
+                # Sanitize user-provided filename
+                safe_name = "".join(ch for ch in custom_filename if ch.isalnum() or ch in ("-", "_", " ")).strip()
+                if not safe_name:
+                    safe_name = f"RFQ-{part_no_original}"
+                if not safe_name.endswith(".xlsx"):
+                    safe_name += ".xlsx"
+            else:
+                # Auto-generate filename
+                date_tag = now.strftime("%d-%b-%Y")
+                safe_name = f"RFQ-{part_no_original}-{date_tag}.xlsx"
+            
+            out_dir = Path("data") / "rfq_estimation" / "custom"
+            out_path = out_dir / safe_name
+            
+            # Check if the file already exists - if so, UPDATE it instead of creating fresh
+            if out_path.exists():
+                # Use master file update logic on existing custom file
+                print(f"[RFQ Export] Updating existing custom file: {out_path.name}")
+                result = write_autofill_to_master_file(
+                    master_path=out_path,
+                    template_path=template_path,
+                    part_no=part_no_original,
+                    autofill_response=resp_dict,
+                    cost_inputs=cost_inputs_dict,
+                    sheet_name="RFQ Details",
+                )
+                out_path = result.output_path
+            else:
+                # Create fresh file from template
+                from app.services.rfq_excel_export_service import write_autofill_to_new_file
+                result = write_autofill_to_new_file(
+                    template_path=template_path,
+                    output_path=out_path,
+                    part_no=part_no_original,
+                    autofill_response=resp_dict,
+                    cost_inputs=cost_inputs_dict,
+                    sheet_name="RFQ Details",
+                )
+                out_path = result.output_path
+            
+        else:  # "copy" mode (legacy)
+            # COPY MODE: Create new timestamped copy each time
+            date_tag = now.strftime("%d-%b%Y")
+            time_tag = now.strftime("%H%M%S")
+            out_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
+            out_path = out_dir / f"autofill_{safe_rfq}_{date_tag}_{time_tag}.xlsx"
+            
+            write_autofill_to_rfq_template(
+                template_path=template_path,
+                output_path=out_path,
+                part_no=part_no_original,
+                autofill_response=resp_dict,
+                cost_inputs=cost_inputs_dict,
+                sheet_name="RFQ Details",
+            )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Template file not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Failed to generate RFQ Excel file")
+    except Exception as e:
+        print(f"[RFQ Export] Error: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to generate RFQ Excel file: {str(e)}")
 
     return FileResponse(
         path=str(out_path),
@@ -579,3 +972,61 @@ async def export_xlsx_from_pdf(
     )
 
 
+@router.get("/exchange_rate")
+async def get_exchange_rate(
+    from_currency: str = "USD",
+    to_currency: str = "INR",
+    fallback: Optional[float] = None,
+):
+    """
+    Get live exchange rate between two currencies.
+    
+    Args:
+        from_currency: Source currency code (default: USD)
+        to_currency: Target currency code (default: INR)
+        fallback: Optional fallback rate if API fails
+        
+    Returns:
+        Exchange rate info with source
+    """
+    try:
+        rate, source = get_live_exchange_rate(
+            from_currency=from_currency,
+            to_currency=to_currency,
+            fallback_rate=fallback,
+        )
+        return {
+            "from_currency": from_currency.upper(),
+            "to_currency": to_currency.upper(),
+            "rate": round(rate, 4),
+            "source": source,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get exchange rate: {str(e)}")
+
+
+@router.get("/exchange_rates")
+async def get_all_exchange_rates(base_currency: str = "USD"):
+    """
+    Get all exchange rates for a base currency.
+    
+    Args:
+        base_currency: Base currency code (default: USD)
+        
+    Returns:
+        Dictionary of all rates for the base currency
+    """
+    try:
+        rates = get_all_rates_for_currency(base_currency=base_currency)
+        if not rates:
+            raise HTTPException(status_code=503, detail="Exchange rate API unavailable")
+        return {
+            "base_currency": base_currency.upper(),
+            "rates": rates,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get exchange rates: {str(e)}")

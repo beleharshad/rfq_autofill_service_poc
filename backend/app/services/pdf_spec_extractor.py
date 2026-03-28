@@ -1,4 +1,4 @@
-﻿"""
+"""
 PDF Specification Extractor Service
 Extracts dimensions and metadata from engineering drawing PDFs.
 """
@@ -13,24 +13,50 @@ class PDFSpecExtractor:
     """Extract specifications from engineering drawing PDFs."""
     
     def __init__(self):
-        # Dimension patterns (supports both inches and mm)
+        # Dimension patterns (supports both inches and mm, handles ranges)
+        # Patterns are ordered by specificity (most specific first)
+        # Note: Patterns capture tolerance ranges (e.g., 0.723-0.727) - we'll extract MAX value
         self.od_patterns = [
-            r'(?:MAX\s*)?(?:OD|O\.D\.|OUTER\s*DIA(?:METER)?)[:\s]*[Ã˜âˆ…]?\s*([\d.]+)\s*(?:"|IN|INCH)?',
-            r'[Ã˜âˆ…]\s*([\d.]+)\s*(?:"|IN|INCH)?\s*(?:MAX\s*)?(?:OD|O\.D\.)?',
-            r'FINISH\s*OD[:\s]*([\d.]+)\s*(?:"|IN)?',
-            r'(?:MAX|MAXIMUM)\s*(?:DIAMETER|DIA)[:\s]*[Ã˜âˆ…]?\s*([\d.]+)',
+            # OCR format: D.089, D.102, @.102 (D/@ = diameter symbol, .089 = value) - HIGHEST PRIORITY
+            r'[D@]\s*\.(\d{2,4})\s*(?:X|[-–]|\s|$)',
+            # OCR format: D.089, @.102 without suffix
+            r'[D@]\s*\.(\d{2,4})(?:\s|$)',
+            # Finish OD with explicit label
+            r'FINISH\s*OD[:\s]*[Ã˜âˆ…Ø]?\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
+            # Finish OD annotation pointing to dimension
+            r'FINISH\s*OD.*?[Ã˜âˆ…Ø]\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?',
+            # OD with diameter symbol before value
+            r'[Ã˜âˆ…Ø]\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?\s*(?:MAX\s*)?(?:OD|O\.D\.|FINISH\s*OD)',
+            # OD with label before value
+            r'(?:MAX\s*)?(?:OD|O\.D\.|OUTER\s*DIA(?:METER)?)[:\s]*[Ã˜âˆ…Ø]?\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
+            # Maximum diameter
+            r'(?:MAX|MAXIMUM)\s*(?:DIAMETER|DIA)[:\s]*[Ã˜âˆ…Ø]?\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?',
+            # Standalone diameter values that look like diameters (0.5 to 10 inches)
+            r'\b([1-9]\.\d{2,3}(?:[-–]\d\.\d{2,3})?)\s*(?:\[[\d.]+\])?\s*(?:IN|INCH|")?',
+            # Leading decimal diameters (.089, .102) in context of diameter keywords
+            r'(?:OD|DIA|DIAMETER|OUTER)[:\s]*\.(\d{2,3}(?:[-–]\.\d{2,3})?)',
         ]
         
         self.id_patterns = [
-            r'(?:ID|I\.D\.|INNER\s*DIA(?:METER)?|BORE)[:\s]*[Ã˜âˆ…]?\s*([\d.]+)\s*(?:"|IN|INCH)?',
-            r'[Ã˜âˆ…]\s*([\d.]+)\s*(?:"|IN|INCH)?\s*(?:ID|I\.D\.|BORE)',
-            r'FINISH\s*ID[:\s]*([\d.]+)\s*(?:"|IN)?',
+            # Finish ID with explicit label (highest priority)
+            r'FINISH\s*ID[:\s]*[Ã˜âˆ…Ø]?\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
+            # Finish ID annotation pointing to dimension
+            r'FINISH\s*ID.*?[Ã˜âˆ…Ø]\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?',
+            # ID with diameter symbol before value
+            r'[Ã˜âˆ…Ø]\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?\s*(?:ID|I\.D\.|BORE|FINISH\s*ID)',
+            # ID with label before value
+            r'(?:ID|I\.D\.|INNER\s*DIA(?:METER)?|BORE)[:\s]*[Ã˜âˆ…Ø]?\s*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
         ]
         
         self.length_patterns = [
-            r'(?:OVERALL\s*)?(?:LENGTH|LG|L)[:\s]*([\d.]+)\s*(?:"|IN|INCH)?',
-            r'(?:MAX|MAXIMUM)\s*LENGTH[:\s]*([\d.]+)',
-            r'FINISH\s*(?:LENGTH|LEN)[:\s]*([\d.]+)\s*(?:"|IN)?',
+            # Finish length with explicit label (highest priority)
+            r'FINISH\s*(?:LENGTH|LEN)[:\s]*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
+            # Finish length annotation pointing to dimension
+            r'FINISH\s*(?:LENGTH|LEN).*?([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?',
+            # Length with label before value
+            r'(?:OVERALL\s*)?(?:LENGTH|LG|L)[:\s]*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?\s*(?:"|IN|INCH)?',
+            # Maximum length
+            r'(?:MAX|MAXIMUM)\s*LENGTH[:\s]*([\d.]+(?:[-–][\d.]+)?)\s*(?:\[[\d.]+\])?',
         ]
         
         # Part metadata patterns
@@ -41,9 +67,15 @@ class PDFSpecExtractor:
         ]
         
         self.material_patterns = [
-            r'(?:MAT(?:ERIAL)?|MATL)[:\s]*([A-Z0-9-]+)',
-            r'(?:SPEC|SPECIFICATION)[:\s]*([A-Z0-9-]+)',
-            r'(\d{2,3}-\d{2}-\d{2})',  # Pattern like 65-45-12
+            r'(?:MAT(?:ERIAL)?|MATL)[:\s]*([A-Z0-9\s\-]+?)(?:\s|$)',
+            r'(?:GRADE)[:\s]*([A-Z0-9\s\-]+?)(?:\s|$)',
+            r'(\d{2,3}-\d{2}-\d{2})',  # Pattern like 65-45-12 (ductile iron)
+            r'(4\d{3})\s*(?:STEEL)?',  # 4140, 4340 steel
+            r'(1\d{3,4})\s*(?:STEEL)?',  # 1018, 1045, 12L14 steel
+            r'(A\d{3})\s*(?:ALUMINUM)?',  # A356 aluminum
+            r'(6\d{3})\s*(?:ALUMINUM)?',  # 6061 aluminum
+            r'(304|316|17-4|15-5)\s*(?:SS|STAINLESS)?',  # Stainless steel grades
+            r'(?:ASTM|SAE|AMS|AISI|MIL)[- ]?([A-Z]?[\d\-]+)',
         ]
         
         self.qty_patterns = [
@@ -53,6 +85,20 @@ class PDFSpecExtractor:
         
         self.revision_patterns = [
             r'(?:REV|REVISION)[:\s]*([A-Z0-9]+)',
+        ]
+        
+        # Part name patterns - common names in engineering drawings
+        self.part_name_patterns = [
+            r'(?:PART\s*NAME|DESCRIPTION|TITLE)[:\s]*([A-Z][A-Z0-9\s\-_]+)',
+            r'(?:NAME)[:\s]*([A-Z][A-Z0-9\s\-_]{2,30})',
+            # Common part names
+            r'\b(PISTON|SHAFT|SLEEVE|BUSHING|HOUSING|FLANGE|ADAPTER|COUPLING|NUT|BOLT|CAP|COVER|RING|PLUG|VALVE|BODY|FITTING|CONNECTOR|SPACER|INSERT|RETAINER|BLOCK|PLATE|ARM|BRACKET|MOUNT|BASE|CYLINDER|SPINDLE|WHEEL|GEAR|PULLEY|HUB|AXLE|PIN|ROD|TUBE)\b',
+        ]
+        
+        # Material specification patterns
+        self.material_spec_patterns = [
+            r'(?:ASTM|SAE|AMS|AISI|MIL)[- ]?[A-Z]?[\d\-]+',
+            r'(?:SPEC(?:IFICATION)?)[:\s]*([A-Z0-9\-]+)',
         ]
     
     def extract_from_file(self, pdf_path: str) -> Dict[str, Any]:
@@ -134,52 +180,103 @@ class PDFSpecExtractor:
     
     def _extract_text_with_ocr(self, pdf_path: str) -> str:
         """Extract text from image-based PDF using OCR."""
+        # Try PyMuPDF built-in text extraction first (works for most PDFs)
         try:
-            # Workaround for Windows OpenMP runtime conflicts (torch/numpy).
-            os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-
-            from pdf2image import convert_from_path
-            import easyocr
-            import numpy as np
+            import fitz  # PyMuPDF
             
-            print(f"Converting PDF to images...")
-            # Convert PDF to images (300 DPI for better quality)
-            images = convert_from_path(pdf_path, dpi=300)
+            print(f"[OCR] Trying PyMuPDF text extraction...")
+            doc = fitz.open(pdf_path)
+            text = ""
+            for page in doc:
+                page_text = page.get_text()
+                if page_text:
+                    text += page_text + "\n"
+            doc.close()
             
-            print(f"Initializing EasyOCR reader...")
-            # Initialize EasyOCR reader (English only for speed)
-            reader = easyocr.Reader(['en'], gpu=False)
+            if text and len(text.strip()) > 50:
+                print(f"[OCR] PyMuPDF extracted {len(text)} characters.")
+                return text
+        except Exception as e:
+            print(f"[OCR] PyMuPDF text extraction failed: {e}")
+        
+        # Try pytesseract OCR (simpler, doesn't need PyTorch)
+        try:
+            import fitz  # PyMuPDF for PDF to image
+            import pytesseract
+            from PIL import Image
+            import io
+            
+            print(f"[OCR] Using Tesseract OCR...")
+            
+            # Open PDF with PyMuPDF
+            doc = fitz.open(pdf_path)
             
             text = ""
-            for i, img in enumerate(images):
-                print(f"OCR processing page {i+1}/{len(images)}...")
+            for i, page in enumerate(doc):
+                print(f"[OCR] Processing page {i+1}/{len(doc)}...")
                 
-                # Convert PIL Image to numpy array
-                img_array = np.array(img)
+                # Render page to image at 300 DPI
+                mat = fitz.Matrix(300/72, 300/72)  # 300 DPI
+                pix = page.get_pixmap(matrix=mat)
                 
-                # Perform OCR
-                results = reader.readtext(img_array)
+                # Convert to PIL Image
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data))
                 
-                # Extract text from results
-                for (bbox, text_content, confidence) in results:
-                    # Only use high-confidence results
-                    if confidence > 0.5:
-                        text += text_content + " "
-                
-                text += "\n"
+                # Perform OCR with pytesseract
+                page_text = pytesseract.image_to_string(img)
+                text += page_text + "\n"
             
-            print(f"OCR completed. Extracted {len(text)} characters.")
+            doc.close()
+            print(f"[OCR] Tesseract extracted {len(text)} characters.")
             return text
             
         except ImportError as e:
-            print(f"OCR libraries not available: {e}")
-            print("Please install: pip install pdf2image easyocr")
-            print("Note: pdf2image requires poppler. On Windows, download from:")
-            print("  http://blog.alivate.com.au/poppler-windows/")
-            return ""
+            print(f"[OCR] pytesseract not available: {e}")
+            print("Install with: pip install pytesseract")
+            print("Also need Tesseract-OCR: https://github.com/UB-Mannheim/tesseract/wiki")
         except Exception as e:
-            print(f"Error in OCR extraction: {e}")
-            return ""
+            print(f"[OCR] Tesseract error: {e}")
+        
+        # Fallback: Try EasyOCR (needs PyTorch, may have DLL issues on Windows)
+        try:
+            os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+            
+            import fitz
+            import easyocr
+            import numpy as np
+            from PIL import Image
+            import io
+            
+            print(f"[OCR] Trying EasyOCR (fallback)...")
+            doc = fitz.open(pdf_path)
+            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+            
+            text = ""
+            for i, page in enumerate(doc):
+                mat = fitz.Matrix(300/72, 300/72)
+                pix = page.get_pixmap(matrix=mat)
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data))
+                img_array = np.array(img)
+                
+                if len(img_array.shape) == 3 and img_array.shape[2] == 4:
+                    img_array = img_array[:, :, :3]
+                
+                results = reader.readtext(img_array)
+                for (bbox, text_content, confidence) in results:
+                    if confidence > 0.4:
+                        text += text_content + " "
+                text += "\n"
+            
+            doc.close()
+            print(f"[OCR] EasyOCR extracted {len(text)} characters.")
+            return text
+            
+        except Exception as e:
+            print(f"[OCR] EasyOCR failed: {e}")
+        
+        return ""
     
     def _extract_specifications(self, text: str, pdf_path: str) -> Dict[str, Any]:
         """Extract all specifications from text."""
@@ -190,15 +287,28 @@ class PDFSpecExtractor:
         part_no_from_text = self._extract_with_patterns(text, self.part_no_patterns)
         specs["part_no"] = part_no_from_file or part_no_from_text
         
-        # Extract dimensions (inches)
-        specs["finish_od_in"] = self._extract_dimension(text, self.od_patterns)
-        specs["finish_id_in"] = self._extract_dimension(text, self.id_patterns)
-        specs["finish_len_in"] = self._extract_dimension(text, self.length_patterns)
+        # Extract dimensions (inches) - try context-aware extraction first
+        specs["finish_od_in"] = self._extract_dimension_with_context(text, "FINISH OD", self.od_patterns)
+        specs["finish_id_in"] = self._extract_dimension_with_context(text, "FINISH ID", self.id_patterns)
+        finish_len_context = self._extract_dimension_with_context(text, "FINISH LENGTH", self.length_patterns)
+        if not finish_len_context:
+            finish_len_context = self._extract_dimension_with_context(text, "FINISH LEN", self.length_patterns)
+        specs["finish_len_in"] = finish_len_context
+        
+        # Fallback to regular extraction if context-aware didn't find anything
+        if not specs["finish_od_in"]:
+            specs["finish_od_in"] = self._extract_dimension(text, self.od_patterns, is_length=False)
+        if not specs["finish_id_in"]:
+            specs["finish_id_in"] = self._extract_dimension(text, self.id_patterns, is_length=False)
+        if not specs["finish_len_in"]:
+            specs["finish_len_in"] = self._extract_dimension(text, self.length_patterns, is_length=True)
         
         # Extract metadata
-        specs["material_grade"] = self._extract_with_patterns(text, self.material_patterns)
+        specs["material_grade"] = self._extract_material_grade(text)
         specs["qty_moq"] = self._extract_quantity(text)
-        specs["revision"] = self._extract_with_patterns(text, self.revision_patterns)
+        specs["revision"] = self._extract_with_patterns(text, self.revision_patterns, max_len=5)
+        specs["part_name"] = self._clean_part_name(text)
+        specs["material_spec"] = self._extract_with_patterns(text, self.material_spec_patterns, max_len=30)
         
         # Add confidence scores
         specs["confidence"] = self._calculate_confidence(specs)
@@ -219,29 +329,309 @@ class PDFSpecExtractor:
         
         return None
     
-    def _extract_dimension(self, text: str, patterns: List[str]) -> Optional[float]:
-        """Extract dimension value from text using multiple patterns."""
-        for pattern in patterns:
+    def _extract_dimension_with_context(self, text: str, context_label: str, patterns: List[str], context_window: int = 200) -> Optional[float]:
+        """Extract dimension value near a specific context label.
+        
+        This method looks for dimensions that appear near labels like "FINISH OD",
+        "FINISH ID", etc., to avoid matching unrelated dimensions on the drawing.
+        
+        Args:
+            text: Full text to search
+            context_label: Label to look for (e.g., "FINISH OD")
+            patterns: List of regex patterns to match dimensions
+            context_window: Number of characters to search around the label
+            
+        Returns:
+            Extracted dimension value or None
+        """
+        # Find all occurrences of the context label
+        label_positions = []
+        for match in re.finditer(re.escape(context_label), text, re.IGNORECASE):
+            label_positions.append(match.start())
+        
+        if not label_positions:
+            return None
+        
+        # Search for dimensions near each label occurrence
+        for label_pos in label_positions:
+            # Extract context window around the label
+            start = max(0, label_pos - context_window)
+            end = min(len(text), label_pos + context_window)
+            context_text = text[start:end]
+            
+            # Try to extract dimension from this context
+            for pattern in patterns:
+                matches = re.finditer(pattern, context_text, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        value_str = match.group(1).strip()
+                        
+                        # Handle dimension ranges (tolerance ranges like 0.723-0.727, .185-.190)
+                        # Check for both regular hyphen and en-dash
+                        range_match = re.search(r'(\d+\.\d+)\s*[-–]\s*(\d+\.\d+)', value_str) or \
+                                     re.search(r'\.(\d+)\s*[-–]\s*\.(\d+)', value_str)
+                        
+                        if range_match:
+                            try:
+                                if range_match.lastindex == 2:
+                                    # Full format: 0.723-0.727
+                                    val1 = float(range_match.group(1))
+                                    val2 = float(range_match.group(2))
+                                else:
+                                    # Leading decimal: .185-.190
+                                    val1_str = '0.' + range_match.group(1)
+                                    val2_str = '0.' + range_match.group(2)
+                                    val1 = float(val1_str)
+                                    val2 = float(val2_str)
+                                
+                                # For length patterns, use average; for diameters, use max
+                                # Check context_label to determine dimension type
+                                if 'LENGTH' in context_label.upper() or 'LEN' in context_label.upper():
+                                    value = (val1 + val2) / 2.0
+                                else:
+                                    value = max(val1, val2)  # MAX for diameters (conservative)
+                                
+                                if 0.01 < value < 1000:
+                                    return round(value, 4)
+                            except (ValueError, IndexError):
+                                continue
+                        
+                        # Also check for simple hyphen split (fallback)
+                        if '-' in value_str and not value_str.startswith('-') and not range_match:
+                            parts = value_str.split('-', 1)
+                            if len(parts) == 2:
+                                try:
+                                    val1_str = parts[0].strip()
+                                    val2_str = parts[1].strip()
+                                    
+                                    # Handle leading decimal point
+                                    if val1_str.startswith('.'):
+                                        val1_str = '0' + val1_str
+                                    if val2_str.startswith('.'):
+                                        val2_str = '0' + val2_str
+                                    
+                                    val1 = float(val1_str)
+                                    val2 = float(val2_str)
+                                    
+                                    # For length patterns, use average; for diameters, use max
+                                    if 'LENGTH' in context_label.upper() or 'LEN' in context_label.upper():
+                                        value = (val1 + val2) / 2.0
+                                    else:
+                                        value = max(val1, val2)
+                                    
+                                    if 0.01 < value < 1000:
+                                        return round(value, 4)
+                                except (ValueError, IndexError):
+                                    continue
+                        
+                        # Handle single value
+                        # Handle leading decimal point (e.g., ".089" -> "0.089")
+                        if value_str.startswith('.'):
+                            value_str = '0' + value_str
+                        # Handle OCR format where pattern captures only digits after decimal (e.g., "089" from "D.089")
+                        elif not '.' in value_str and len(value_str) >= 2 and value_str.isdigit():
+                            # This might be from OCR pattern like "D.089" where we captured "089"
+                            value_str = '0.' + value_str
+                        
+                        value = float(value_str)
+                        
+                        # For diameters, reasonable range is 0.01 to 10 inches
+                        # For lengths, reasonable range is 0.01 to 100 inches
+                        max_value = 100 if 'LENGTH' in context_label.upper() or 'LEN' in context_label.upper() else 10
+                        if 0.01 < value < max_value:
+                            return round(value, 4)
+                    except (ValueError, IndexError):
+                        continue
+        
+        return None
+    
+    def _extract_dimension(self, text: str, patterns: List[str], is_length: bool = False) -> Optional[float]:
+        """Extract dimension value from text using multiple patterns.
+        
+        Handles dimension ranges (e.g., "1.006-1.008") by taking the maximum value.
+        For length dimensions, takes the average of the range.
+        
+        Args:
+            text: Text to search
+            patterns: List of regex patterns to match dimensions
+            is_length: True if extracting length dimension, False for OD/ID
+        """
+        for pattern_idx, pattern in enumerate(patterns):
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 try:
-                    value_str = match.group(1)
+                    value_str = match.group(1).strip()
+                    matched_text = match.group(0)
+                    
+                    # Handle OCR format where pattern captures only digits after decimal (e.g., "089" from "D.089")
+                    # Check if this is from an OCR pattern (D.089 or @.102 format) - first 2 patterns
+                    is_ocr_decimal_format = pattern_idx < 2 and not '.' in value_str and len(value_str) >= 2 and len(value_str) <= 4
+                    if is_ocr_decimal_format:
+                        # Convert "089" -> "0.089"
+                        value_str = '0.' + value_str
+                    
+                    # Handle dimension ranges (tolerance ranges like 0.723-0.727, .185-.190)
+                    # Check for both regular hyphen and en-dash
+                    range_match = re.search(r'(\d+\.\d+)\s*[-–]\s*(\d+\.\d+)', value_str) or \
+                                 re.search(r'\.(\d+)\s*[-–]\s*\.(\d+)', value_str)
+                    
+                    if range_match:
+                        try:
+                            if range_match.lastindex == 2:
+                                # Full format: 0.723-0.727
+                                val1 = float(range_match.group(1))
+                                val2 = float(range_match.group(2))
+                            else:
+                                # Leading decimal: .185-.190
+                                val1_str = '0.' + range_match.group(1)
+                                val2_str = '0.' + range_match.group(2)
+                                val1 = float(val1_str)
+                                val2 = float(val2_str)
+                            
+                            # For OD/ID patterns, use max value (conservative)
+                            # For length patterns, use average
+                            if is_length:
+                                value = (val1 + val2) / 2.0  # Average for length
+                            else:
+                                value = max(val1, val2)  # Max for diameters
+                            
+                            # Sanity check: dimensions should be reasonable
+                            if 0.01 < value < 1000:  # Inches
+                                return round(value, 4)
+                        except (ValueError, IndexError):
+                            continue
+                    
+                    # Also check for simple hyphen split (fallback)
+                    if '-' in value_str and not value_str.startswith('-') and not range_match:
+                        parts = value_str.split('-', 1)
+                        if len(parts) == 2:
+                            try:
+                                val1_str = parts[0].strip()
+                                val2_str = parts[1].strip()
+                                
+                                # Handle leading decimal point (e.g., ".185-.190")
+                                if val1_str.startswith('.'):
+                                    val1_str = '0' + val1_str
+                                if val2_str.startswith('.'):
+                                    val2_str = '0' + val2_str
+                                
+                                val1 = float(val1_str)
+                                val2 = float(val2_str)
+                                
+                                # For OD/ID patterns, use max value (conservative)
+                                # For length patterns, use average
+                                if is_length:
+                                    value = (val1 + val2) / 2.0  # Average for length
+                                else:
+                                    value = max(val1, val2)  # Max for diameters
+                                
+                                # Sanity check: dimensions should be reasonable
+                                if 0.01 < value < 1000:  # Inches
+                                    return round(value, 4)
+                            except (ValueError, IndexError):
+                                continue
+                    
+                    # Handle single value
+                    # Handle leading decimal point (e.g., ".185")
+                    if value_str.startswith('.'):
+                        value_str = '0' + value_str
+                    # OCR format already handled above (converted "089" -> "0.089")
+                    
                     value = float(value_str)
                     
                     # Sanity check: dimensions should be reasonable
-                    if 0.01 < value < 1000:  # Inches
+                    # For diameters, reasonable range is 0.01 to 10 inches
+                    # For lengths, reasonable range is 0.01 to 100 inches
+                    max_value = 100 if is_length else 10
+                    if 0.01 < value < max_value:
                         return round(value, 4)
                 except (ValueError, IndexError):
                     continue
         
         return None
     
-    def _extract_with_patterns(self, text: str, patterns: List[str]) -> Optional[str]:
+    def _extract_with_patterns(self, text: str, patterns: List[str], max_len: int = 50) -> Optional[str]:
         """Extract text value using multiple patterns."""
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                value = match.group(1).strip() if match.lastindex else match.group(0).strip()
+                # Limit length and clean up
+                value = value[:max_len]
+                # Remove trailing noise
+                value = re.sub(r'\s+(REMOVE|ALL|AND|THE|OR|FOR|WITH).*$', '', value, flags=re.IGNORECASE)
+                # Clean up whitespace
+                value = ' '.join(value.split())
+                if len(value) >= 2:
+                    return value
+        
+        return None
+    
+    def _extract_material_grade(self, text: str) -> Optional[str]:
+        """Extract material grade with better validation."""
+        # Try specific material patterns first
+        material_keywords = {
+            # Steel grades
+            r'4140': '4140 Steel',
+            r'4340': '4340 Steel',
+            r'1018': '1018 Steel',
+            r'1045': '1045 Steel',
+            r'12L14': '12L14 Steel',
+            r'8620': '8620 Steel',
+            # Stainless steel
+            r'304\s*(?:SS)?': '304 SS',
+            r'316\s*(?:SS)?': '316 SS',
+            r'17-4\s*(?:PH)?': '17-4 PH SS',
+            r'15-5\s*(?:PH)?': '15-5 PH SS',
+            # Aluminum
+            r'6061': '6061 Aluminum',
+            r'7075': '7075 Aluminum',
+            r'A356': 'A356 Aluminum',
+            # Ductile iron (65-45-12 pattern)
+            r'(\d{2})-(\d{2})-(\d{2})': None,  # Will be handled specially
+            # Cast iron
+            r'(?:CAST\s*IRON|CI)': 'Cast Iron',
+            # Bronze
+            r'(?:BRONZE|C93\d{3})': 'Bronze',
+            # Brass
+            r'(?:BRASS|C36\d{3})': 'Brass',
+        }
+        
+        text_upper = text.upper()
+        
+        for pattern, grade in material_keywords.items():
+            match = re.search(pattern, text_upper, re.IGNORECASE)
+            if match:
+                if grade is None:  # Ductile iron pattern
+                    return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                return grade
+        
+        # Fallback to generic pattern matching
+        return self._extract_with_patterns(text, self.material_patterns, max_len=30)
+    
+    def _clean_part_name(self, text: str) -> Optional[str]:
+        """Extract clean part name from OCR text."""
+        # Common part names in machined parts
+        part_names = [
+            'PISTON', 'SHAFT', 'SLEEVE', 'BUSHING', 'HOUSING', 'FLANGE', 'ADAPTER',
+            'COUPLING', 'NUT', 'BOLT', 'CAP', 'COVER', 'RING', 'PLUG', 'VALVE', 'BODY',
+            'FITTING', 'CONNECTOR', 'SPACER', 'INSERT', 'RETAINER', 'BLOCK', 'PLATE',
+            'ARM', 'BRACKET', 'MOUNT', 'BASE', 'CYLINDER', 'SPINDLE', 'WHEEL', 'GEAR',
+            'PULLEY', 'HUB', 'AXLE', 'PIN', 'ROD', 'TUBE', 'GLAND', 'HEAD', 'SEAL',
+            'BEARING', 'COLLAR', 'GUIDE', 'SUPPORT', 'CLAMP', 'LEVER', 'LINK', 'HANDLE'
+        ]
+        
+        # Look for compound names like "HEAD GLAND", "PISTON ROD"
+        for name1 in part_names:
+            for name2 in part_names:
+                compound = f"{name1} {name2}"
+                if compound in text.upper():
+                    return compound.title()
+        
+        # Look for single names
+        for name in part_names:
+            if name in text.upper():
+                return name.title()
         
         return None
     
@@ -276,6 +666,255 @@ class PDFSpecExtractor:
         
         return confidence
     
+    def extract_all_dimension_candidates(self, pdf_path: str) -> List[Dict[str, Any]]:
+        """Scrape ALL plausible dimension candidates from the raw OCR text.
+
+        Returns a list of dicts suitable for ``raw_dimensions``:
+            { value_in, value, text, confidence, kind, unit, is_tolerance }
+
+        Unlike ``extract_from_file`` (which returns a single best OD/ID/LEN),
+        this method returns *every* numeric token that looks like an engineering
+        dimension, together with a heuristic ``kind`` classification.
+        The downstream ``ocr_finish_selector`` will score and pick the best.
+        """
+        text = self._extract_text_from_pdf(pdf_path)
+        if not text or len(text.strip()) < 30:
+            return []
+
+        candidates: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        # Patterns that capture tolerance ranges and single values in OCR text.
+        # We scan line-by-line to preserve context for classification.
+        _DIM_RE = re.compile(
+            r"""
+            (?:                          # tolerance range forms:
+              (\d*\.\d+)\s*[-\u2013]\s*(\d*\.\d+)   # 1.006-1.008  or  .185-.190
+            )
+            |                            # OR single decimal:
+            (?<![A-Z])                   # not preceded by letter (avoid "REV" etc.)
+            (\d{0,2}\.\d{2,5})          # 0.443  or  1.240  or  .630
+            (?!\d)                       # not followed by more digits
+            """,
+            re.VERBOSE,
+        )
+
+        _BRACKET_RE = re.compile(r"\[.*?\]")
+        _RAW_KW = re.compile(r"\b(RAW|STOCK|BAR|BLANK|RM)\b", re.IGNORECASE)
+        _THREAD_KW = re.compile(r"\b(THREAD|UNC|UNF|PITCH|TAP)\b", re.IGNORECASE)
+        _SCALE_KW = re.compile(r"\bSCALE\b", re.IGNORECASE)
+
+        _OD_KW = re.compile(
+            r"\b(FINISH\s*OD|OD|O\.D|DIA|DIAMETER|OUTER)\b"
+            r"|[D@]\s*\.\d"
+            r"|\u00d8|\u2205|\u2300",
+            re.IGNORECASE,
+        )
+        _ID_KW = re.compile(
+            r"\b(FINISH\s*ID|ID|I\.D|BORE|INNER)\b", re.IGNORECASE,
+        )
+        _LEN_KW = re.compile(
+            r"\b(FINISH\s*(?:LENGTH|LEN)|LENGTH|LEN|OAL|OVERALL)\b", re.IGNORECASE,
+        )
+
+        # Extra pattern: OCR garbles like "BD. 443" or "D. 443" → 0.443
+        _GARBLED_DEC_RE = re.compile(
+            r"(B?[D@])\.\s+(\d{2,4})", re.IGNORECASE,
+        )
+
+        # Garbled Ø prefix: OCR reads Ø as O, G, C, Q, etc.
+        # Matches "O1.475", "G1.490", "Q0.750" → extracts the number as a diameter.
+        _DIA_PREFIX_RE = re.compile(
+            r"(?<![A-Z0-9])([OGCQogcq\u00d8\u2205\u2300])\s*(\d{1,2}\.\d{2,5})(?!\d)",
+        )
+
+        for line in text.split("\n"):
+            line_stripped = line.strip()
+            # Clean OCR artifacts: backslash before dot (e.g., "1\.490" → "1.490")
+            line_stripped = re.sub(r'(\d)\\\.', r'\1.', line_stripped)
+            if not line_stripped:
+                continue
+            if _BRACKET_RE.sub("", line_stripped).strip() == "":
+                continue
+            if _RAW_KW.search(line_stripped) or _THREAD_KW.search(line_stripped):
+                continue
+            if _SCALE_KW.search(line_stripped):
+                continue
+            _upper = line_stripped.upper()
+            # Skip lines that are metric bracket equivalents or start with [ or (
+            if re.match(r"^[\(\[C][\d.,\-\u2013\s]+[\)\]]", line_stripped):
+                continue
+            # Lines like "C1.6] | C1.78)" are metric equivalents
+            if re.match(r"^C\d", line_stripped):
+                continue
+            # Skip notes / tolerance specification / title-block lines
+            if any(kw in _upper for kw in (
+                "UNLESS OTHERWISE", "CORNER RADI", "TO BE BROKEN",
+                "TOLERANCE", "DUCTILE IRON", "MATERIAL DESCRIPTION",
+                "MATERIAL MUST CONFORM", "DIMENSIONS ARE IN",
+                "STANDARD TOLERANCE", "ENGINEER", "DESIGNER",
+                "CUSTOMER", "MASS (LBS)", "DO NOT SCALE",
+            )):
+                continue
+
+            # --- Pass 1: garbled-decimal patterns (BD. 443 → 0.443) ---
+            for gm in _GARBLED_DEC_RE.finditer(line_stripped):
+                prefix = gm.group(1).upper()
+                digits = gm.group(2)
+                val_s = "0." + digits
+                try:
+                    val = float(val_s)
+                except ValueError:
+                    continue
+                if val <= 0.009 or val > 30.0:
+                    continue
+                key = round(val, 5)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                # "BD" prefix = Bore/Diameter → classify as ID
+                ctx = line_stripped
+                kind: Optional[str] = None
+                conf = 0.75
+                if prefix == "BD" or prefix == "B" or _ID_KW.search(ctx):
+                    kind = "ID"
+                    conf = 0.80
+                elif _OD_KW.search(ctx):
+                    kind = "OD"
+                    conf = 0.75
+                else:
+                    kind = "OD"
+                    conf = 0.60
+
+                candidates.append({
+                    "value_in": round(val, 4),
+                    "value": round(val, 4),
+                    "text": line_stripped[:80].strip(),
+                    "confidence": conf,
+                    "kind": kind,
+                    "unit": "in",
+                    "is_tolerance": False,
+                })
+
+            # --- Pass 1b: garbled Ø-prefix (O1.475, G1.490 → diameter) ---
+            for pm in _DIA_PREFIX_RE.finditer(line_stripped):
+                prefix_char = pm.group(1)
+                num_s = pm.group(2)
+                try:
+                    val = float(num_s)
+                except ValueError:
+                    continue
+                if val <= 0.009 or val > 30.0:
+                    continue
+                key = round(val, 5)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                kind = "OD"
+                conf = 0.75
+                if _ID_KW.search(line_stripped):
+                    kind = "ID"
+                    conf = 0.80
+                elif _OD_KW.search(line_stripped):
+                    conf = 0.80
+
+                candidates.append({
+                    "value_in": round(val, 4),
+                    "value": round(val, 4),
+                    "text": line_stripped[:80].strip(),
+                    "confidence": conf,
+                    "kind": kind,
+                    "unit": "in",
+                    "is_tolerance": False,
+                })
+
+            # --- Pass 2: standard dimension patterns ---
+            for m in _DIM_RE.finditer(line_stripped):
+                is_tol = False
+                if m.group(1) and m.group(2):
+                    lo_s, hi_s = m.group(1), m.group(2)
+                    if lo_s.startswith("."):
+                        lo_s = "0" + lo_s
+                    if hi_s.startswith("."):
+                        hi_s = "0" + hi_s
+                    try:
+                        lo, hi = float(lo_s), float(hi_s)
+                    except ValueError:
+                        continue
+                    val = max(lo, hi)
+                    is_tol = True
+                else:
+                    single = m.group(3) or ""
+                    if single.startswith("."):
+                        single = "0" + single
+                    try:
+                        val = float(single)
+                    except ValueError:
+                        continue
+
+                if val <= 0.009 or val > 30.0:
+                    continue
+                start_pos = m.start()
+                preceding = line_stripped[:start_pos]
+                if preceding.rstrip().endswith("["):
+                    continue
+
+                key = round(val, 5)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                # --- Classification: use LOCAL context near the match ---
+                # Take ~30 chars before the match for local context
+                local_start = max(0, m.start() - 30)
+                local_ctx = line_stripped[local_start:m.end() + 10]
+
+                kind = None
+                conf = 0.70
+
+                # Check immediate prefix for D.xxx / @.xxx → likely bore/OD
+                imm_prefix = line_stripped[max(0, m.start() - 3):m.start()]
+                is_d_prefix = bool(re.search(r"[D@]\s*$", imm_prefix))
+
+                if _ID_KW.search(local_ctx):
+                    kind = "ID"
+                    conf = 0.80
+                elif is_d_prefix and is_tol and val < 1.0:
+                    # D.xxx-yyy with small value: likely bore measurement
+                    kind = "ID"
+                    conf = 0.75
+                elif _OD_KW.search(local_ctx):
+                    kind = "OD"
+                    conf = 0.80
+                elif _LEN_KW.search(local_ctx):
+                    kind = "LEN"
+                    conf = 0.80
+                else:
+                    if 0.1 <= val <= 5.0:
+                        kind = "OD"
+                        conf = 0.60
+                    elif val > 5.0:
+                        kind = "LEN"
+                        conf = 0.50
+                    else:
+                        kind = "OD"
+                        conf = 0.50
+
+                text_snip = line_stripped[:80].strip()
+                candidates.append({
+                    "value_in": round(val, 4),
+                    "value": round(val, 4),
+                    "text": text_snip,
+                    "confidence": conf,
+                    "kind": kind,
+                    "unit": "in",
+                    "is_tolerance": is_tol,
+                })
+
+        return candidates
+
     def format_for_rfq(self, specs: Dict[str, Any], cost_inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Format extracted specs into RFQ autofill format.

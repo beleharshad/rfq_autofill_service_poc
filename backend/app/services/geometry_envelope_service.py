@@ -18,6 +18,64 @@ class GeometryEnvelopeService:
         """Compute geometry envelope from request."""
         # Load part summary
         part_summary = self._load_part_summary(request.source)
+        
+        # TASK 1: Runtime verification - log BEFORE calibration
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        scale_report_before = part_summary.get("scale_report", {})
+        scale_method_before = scale_report_before.get("method", "unknown") if isinstance(scale_report_before, dict) else "unknown"
+        
+        segments_before = part_summary.get("segments", [])
+        max_od_before = 0.0
+        if segments_before:
+            max_od_before = max(seg.get("od_diameter", 0.0) for seg in segments_before if isinstance(seg, dict))
+        
+        totals_before = part_summary.get("totals", {})
+        total_length_before = totals_before.get("total_length_in", 0.0) if isinstance(totals_before, dict) else 0.0
+        
+        logger.info(f"[RFQ_ENVELOPE_BEFORE_CALIBRATION] scale_method={scale_method_before}, max_od_in={max_od_before:.4f}, total_length_in={total_length_before:.4f}")
+        
+        # TASK 7: Run geometry scale calibration BEFORE envelope computation
+        from ..services.geometry_scale_calibration import GeometryScaleCalibrationService
+        
+        calibration_service = GeometryScaleCalibrationService()
+        job_id = request.source.get("job_id")
+        calibrated_part_summary, scale_factor, calibration_confidence, ratios = calibration_service.calibrate_geometry_scale(
+            part_summary,
+            job_id=job_id
+        )
+        
+        # TASK 1: Runtime verification - log AFTER calibration (if applied)
+        scale_calibration_applied = scale_factor is not None
+        matched_pairs_count = len(ratios) if ratios else 0
+        
+        # Extract scaling flags from scale_report
+        scaled_xy_flag = False
+        scaled_z_flag = False
+        if scale_calibration_applied:
+            scale_report_after = calibrated_part_summary.get("scale_report", {})
+            if isinstance(scale_report_after, dict):
+                scaled_xy_flag = scale_report_after.get("scaled_xy", False)
+                scaled_z_flag = scale_report_after.get("scaled_z", False)
+            
+            scale_method_after = scale_report_after.get("method", "unknown") if isinstance(scale_report_after, dict) else "unknown"
+            
+            segments_after = calibrated_part_summary.get("segments", [])
+            max_od_after = 0.0
+            if segments_after:
+                max_od_after = max(seg.get("od_diameter", 0.0) for seg in segments_after if isinstance(seg, dict))
+            
+            totals_after = calibrated_part_summary.get("totals", {})
+            total_length_after = totals_after.get("total_length_in", 0.0) if isinstance(totals_after, dict) else 0.0
+            
+            xy_scale = scale_report_after.get("xy_scale", scale_factor) if isinstance(scale_report_after, dict) else scale_factor
+            z_scale = scale_report_after.get("z_scale", 1.0) if isinstance(scale_report_after, dict) else 1.0
+            
+            logger.info(f"[RFQ_ENVELOPE_AFTER_CALIBRATION] scale_method={scale_method_after}, max_od_in={max_od_after:.4f}, total_length_in={total_length_after:.4f}, xy_scale={xy_scale:.4f}, z_scale={z_scale:.4f}, scaled_xy={scaled_xy_flag}, scaled_z={scaled_z_flag}")
+            part_summary = calibrated_part_summary  # Use calibrated geometry
+        else:
+            logger.info(f"[RFQ_ENVELOPE_AFTER_CALIBRATION] scale_calibration_applied=false, using original geometry")
 
         # Extract inputs
         units = part_summary.get("units", {})
@@ -80,6 +138,15 @@ class GeometryEnvelopeService:
             raw_len_in=self._create_field_value(raw_len_in, base_conf, "rule.allowance+rounding")
         )
 
+        # Extract scaling flags from scale_report
+        scaled_xy_flag = False
+        scaled_z_flag = False
+        if scale_calibration_applied:
+            scale_report_after = part_summary.get("scale_report", {})
+            if isinstance(scale_report_after, dict):
+                scaled_xy_flag = scale_report_after.get("scaled_xy", False)
+                scaled_z_flag = scale_report_after.get("scaled_z", False)
+        
         # Create debug info
         debug = {
             "max_od_in": finish_max_od_in,
@@ -88,7 +155,13 @@ class GeometryEnvelopeService:
             "scale_method": scale_method,
             "overall_confidence": base_conf,
             "validation_passed": validation_passed,
-            "notes": []
+            "notes": [],
+            # TASK 1: Add debug fields for scale calibration
+            "scale_calibration_applied": scale_calibration_applied,
+            "scale_factor_used": scale_factor if scale_calibration_applied else None,
+            "matched_pairs": matched_pairs_count,
+            "scaled_xy": scaled_xy_flag if scale_calibration_applied else None,
+            "scaled_z": scaled_z_flag if scale_calibration_applied else None
         }
 
         return EnvelopeResponse(
@@ -218,7 +291,7 @@ class GeometryEnvelopeService:
             return "REJECTED", reasons
 
         # Check scale method
-        if scale_method != "anchor_dimension":
+        if scale_method not in ("anchor_dimension", "calibrated_from_ocr", "dpi_based"):
             reasons.append("SCALE_ESTIMATED")
 
         # Check for missing/invalid dimensions

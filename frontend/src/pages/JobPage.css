@@ -8,6 +8,127 @@
   margin: 0 auto;
 }
 
+/* ── Slim single-panel layout ─────────────────────────────────────────── */
+.job-page--slim {
+  /* Fill remaining space below the app-header in the flex column chain. */
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  max-width: unset;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #0d1117;
+  /* Ensure the page really fills the parent height even inside a scroll container */
+  height: 100%;
+  align-self: stretch;
+}
+
+.job-header--slim {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+  justify-content: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 50;
+}
+
+.job-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6edf3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+  min-width: 0;   /* allow shrinking so it never pushes the Logs button off-screen */
+  flex-shrink: 1;
+}
+
+/* Prevent legacy ".job-header h1" selector from overriding slim title size */
+.job-header--slim .job-title {
+  font-size: 16px;
+}
+
+.job-mode-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  background: #21262d;
+  color: #8b949e;
+}
+.job-mode-badge--auto_convert {
+  background: #1a4a2a;
+  color: #3fb950;
+}
+.job-mode-badge--assisted_manual {
+  background: #3d2a0f;
+  color: #e3b341;
+}
+
+.job-status-chip {
+  font-size: 11px;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.job-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;   /* never let the actions area collapse */
+}
+
+.job-tab-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid #444c56;
+  background: #21262d;     /* solid background so it always stands out */
+  color: #cdd9e5;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.job-tab-btn:hover,
+.job-tab-btn.active {
+  color: #ffffff;
+  border-color: #58a6ff;
+  background: #1f6feb;
+}
+
+.job-main {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.job-logs-overlay {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: #0d1117;
+}
+
 .job-header {
   padding: 1rem 2rem;
   background-color: #1a1a1a;

@@ -47,6 +47,12 @@ class EnvelopeDebug(BaseModel):
     overall_confidence: float
     validation_passed: Optional[bool] = None
     notes: List[str] = Field(default_factory=list)
+    # Scale calibration debug fields
+    scale_calibration_applied: Optional[bool] = Field(None, description="Whether geometry scale calibration was applied")
+    scale_factor_used: Optional[float] = Field(None, description="Scale factor used for calibration (null if not applied)")
+    matched_pairs: Optional[int] = Field(None, description="Number of matched OCR-geometry pairs used for calibration")
+    scaled_xy: Optional[bool] = Field(None, description="Whether XY dimensions (diameters) were scaled")
+    scaled_z: Optional[bool] = Field(None, description="Whether Z dimensions (lengths) were scaled")
 
 
 class EnvelopeResponse(BaseModel):

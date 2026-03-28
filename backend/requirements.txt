@@ -13,5 +13,10 @@ matplotlib  # Optional: for debug plots (OD radius curve visualization)
 openpyxl==3.1.5
 pdfplumber==0.11.9  # PDF text extraction for engineering drawings
 PyPDF2==3.0.1  # Fallback PDF parser
-pdf2image==1.17.0  # PDF to image conversion for OCR
-ocrmypdf
+pytesseract  # OCR via Tesseract (simpler than EasyOCR, no PyTorch needed)
+pillow  # Image processing for OCR
+requests>=2.31.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+google-auth>=2.20.0
+google-genai>=0.8.0

@@ -705,11 +705,21 @@ class VendorQuoteExtractionService:
 
         def line_flags(line: str) -> Dict[str, bool]:
             l = f" {line} "
+            # Check for tolerance ranges (e.g., 0.723-0.727, 1.006-1.008, .185-.190)
+            has_tolerance_range = bool(
+                re.search(r'\d+\.\d+\s*[-–]\s*\d+\.\d+', l) or
+                re.search(r'\.\d+\s*[-–]\s*\.\d+', l)
+            )
+            # Check for metric brackets [mm]
+            has_metric_bracket = bool(re.search(r'\[[\d.]+\]', l))
+            
             return {
                 "is_scale": "SCALE" in l,
                 "is_radius": bool(re.search(r"\bR\.\d", l)) or ("R." in l),
                 "is_thread": ("UNC" in l) or ("UN-" in l) or ("-2B" in l) or ("THREAD" in l),
-                "is_tol": ("TOL" in l) or ("±" in l) or ("DEG" in l),
+                "is_tol": ("TOL" in l) or ("±" in l) or ("DEG" in l) or has_tolerance_range,
+                "is_tolerance_range": has_tolerance_range,  # New flag
+                "is_metric_bracket": has_metric_bracket,  # New flag
                 "is_cost": any(k in l for k in ["USD", "INR", "COST", "PRICE", "RATE", "EXCHANGE", "CURRENCY"]),
                 "is_material_grade": bool(re.search(r"\b\d{2,3}-\d{2}-\d{2}\b", l)),
                 "has_dia": ("DIA" in l) or ("Ø" in l) or ("∅" in l) or (" DI." in l) or (" DI " in l),
@@ -727,6 +737,14 @@ class VendorQuoteExtractionService:
             flags = line_flags(raw_line)
             if flags["is_cost"] or flags["is_material_grade"]:
                 continue
+            
+            # Rule 1: Ignore metric bracket values
+            if flags["is_metric_bracket"]:
+                continue
+            
+            # Rule 2: Ignore tolerance ranges
+            if flags["is_tolerance_range"]:
+                continue
 
             line_num = norm_numeric_line(raw_line)
             for m in number_re.finditer(line_num):
@@ -734,8 +752,43 @@ class VendorQuoteExtractionService:
                 v = _to_float(raw)
                 if v is None:
                     continue
+                
+                # Skip if value is inside brackets (metric)
+                match_start = m.start()
+                match_end = m.end()
+                context_before = raw_line[max(0, match_start-20):match_start]
+                context_after = raw_line[match_end:min(len(raw_line), match_end+20)]
+                if '[' in context_before and ']' in context_after:
+                    continue  # Skip metric bracket values
+                
                 base = to_inches_from_line(v, raw_line)
-
+                
+                # Check for tolerance range in the line (e.g., 0.723-0.727, 1.006-1.008)
+                tolerance_range_match = re.search(r'(\d+\.\d+)\s*[-–]\s*(\d+\.\d+)', raw_line) or \
+                                       re.search(r'\.(\d+)\s*[-–]\s*\.(\d+)', raw_line)
+                
+                if tolerance_range_match:
+                    # Extract both values from tolerance range
+                    try:
+                        if tolerance_range_match.lastindex == 2:
+                            val1 = float(tolerance_range_match.group(1))
+                            val2 = float(tolerance_range_match.group(2))
+                        else:
+                            # Leading decimal: .185-.190
+                            val1_str = '0.' + tolerance_range_match.group(1)
+                            val2_str = '0.' + tolerance_range_match.group(2)
+                            val1 = float(val1_str)
+                            val2 = float(val2_str)
+                        
+                        # For diameters: use MAX (conservative)
+                        # For lengths: use average
+                        if flags["has_dia"] or flags["has_id"]:
+                            base = max(val1, val2)  # MAX for diameters
+                        else:
+                            base = (val1 + val2) / 2.0  # Average for lengths
+                    except (ValueError, IndexError):
+                        pass  # Use original base value if parsing fails
+                
                 candidates: List[float] = [base]
                 if "." not in raw and raw.isdigit() and 3 <= len(raw) <= 5:
                     n = int(raw)
@@ -754,6 +807,10 @@ class VendorQuoteExtractionService:
                         score = _clamp01(score - 0.08)
                     if "." not in raw and raw.isdigit() and len(raw) <= 2:
                         score = _clamp01(score - 0.20)
+                    
+                    # Slight penalty for tolerance ranges (prefer explicit values)
+                    if flags.get("is_tolerance_range", False):
+                        score = _clamp01(score - 0.05)
 
                     tup = (vin, score, raw_line, flags)
                     generic_cands.append(tup)
@@ -772,50 +829,134 @@ class VendorQuoteExtractionService:
             items.sort(key=lambda x: (x[1], x[0]), reverse=True)
             return items[0]
 
-        # 1) OD: diameter callout, not scale/radius/thread
+        # 1) OD: diameter callout, not scale/radius/thread/bracket
+        # Note: Tolerance ranges are now parsed to extract MAX value, so accept them
+        # Prefer dimensions in main body range (0.5-2.5") to avoid small features
         od_pick = best_from(
             dia_cands,
-            lambda v, s, l, f: (not f["is_scale"]) and (not f["is_radius"]) and (not f["is_thread"]) and (0.2 <= v <= 6.0),
+            lambda v, s, l, f: (
+                (not f["is_scale"]) and 
+                (not f["is_radius"]) and 
+                (not f["is_thread"]) and 
+                (not f.get("is_metric_bracket", False)) and
+                (0.25 <= v <= 5.0)  # Updated range per requirements
+            ),
         )
+        
+        # If we got a very large OD (>2.5"), try to find a better match in main body range
+        if od_pick and od_pick[0] > 2.5:
+            od_pick_main_body = best_from(
+                dia_cands,
+                lambda v, s, l, f: (
+                    (not f["is_scale"]) and 
+                    (not f["is_radius"]) and 
+                    (not f["is_thread"]) and 
+                    (not f.get("is_metric_bracket", False)) and
+                    (0.5 <= v <= 2.5)  # Prefer main body range
+                ),
+            )
+            if od_pick_main_body:
+                od_pick = od_pick_main_body
+        
         od_val = od_pick[0] if od_pick else None
         od_conf = od_pick[1] if od_pick else 0.55
 
-        # 2) ID: explicit ID/BORE line, not scale/radius/thread; else DIA < OD
+        # 2) ID: explicit ID/BORE line, not scale/radius/thread/bracket; else DIA < OD
+        # Note: Tolerance ranges are now parsed to extract MAX value, so accept them
         id_pick = best_from(
             id_cands,
-            lambda v, s, l, f: (not f["is_scale"]) and (not f["is_radius"]) and (not f["is_thread"]) and (0.05 <= v <= 6.0),
+            lambda v, s, l, f: (
+                (not f["is_scale"]) and 
+                (not f["is_radius"]) and 
+                (not f["is_thread"]) and 
+                (not f.get("is_metric_bracket", False)) and
+                (0.05 <= v <= 5.0)
+            ),
         )
         if id_pick:
             id_val = id_pick[0]
             id_conf = id_pick[1]
         else:
-            id_val = None
+            id_val = None  # Changed: None instead of 0.0
             id_conf = 0.55
             if isinstance(od_val, float):
                 id_from_dia = best_from(
                     dia_cands,
-                    lambda v, s, l, f: (not f["is_scale"]) and (not f["is_radius"]) and (not f["is_thread"]) and (0.05 <= v <= od_val * 0.95),
+                    lambda v, s, l, f: (
+                        (not f["is_scale"]) and 
+                        (not f["is_radius"]) and 
+                        (not f["is_thread"]) and 
+                        (not f.get("is_metric_bracket", False)) and
+                        (0.05 <= v <= od_val * 0.95)
+                    ),
                 )
                 if id_from_dia:
                     id_val = id_from_dia[0]
                     id_conf = id_from_dia[1] - 0.08
 
-        # 3) LEN: explicit length line preferred; else best generic >2.0 not radius/thread; scale allowed only if no other
+        # 3) LEN: explicit length line preferred; else best generic >0.3 not radius/thread/bracket; scale allowed only if no other
+        # Note: Tolerance ranges are now parsed to extract average value, so accept them
+        # Prefer reasonable lengths (0.3-5.0") to avoid selecting wrong dimensions
         len_pick = best_from(
             len_cands,
-            lambda v, s, l, f: (not f["is_radius"]) and (not f["is_thread"]) and (0.5 <= v <= 20.0),
+            lambda v, s, l, f: (
+                (not f["is_radius"]) and 
+                (not f["is_thread"]) and 
+                (not f.get("is_metric_bracket", False)) and
+                (v >= 0.3) and  # Updated: > 0.3" per requirements (not small shoulder)
+                (v <= 5.0)  # Prefer reasonable lengths first
+            ),
         )
+        if not len_pick:
+            # Try wider range
+            len_pick = best_from(
+                len_cands,
+                lambda v, s, l, f: (
+                    (not f["is_radius"]) and 
+                    (not f["is_thread"]) and 
+                    (not f.get("is_metric_bracket", False)) and
+                    (v >= 0.3) and
+                    (v <= 20.0)
+                ),
+            )
         if not len_pick:
             # Non-scale candidates first
             len_pick = best_from(
                 generic_cands,
-                lambda v, s, l, f: (not f["is_scale"]) and (not f["is_radius"]) and (not f["is_thread"]) and (2.0 <= v <= 20.0),
+                lambda v, s, l, f: (
+                    (not f["is_scale"]) and 
+                    (not f["is_radius"]) and 
+                    (not f["is_thread"]) and 
+                    (not f.get("is_metric_bracket", False)) and
+                    (v >= 0.3) and  # Updated: > 0.3" per requirements
+                    (v <= 5.0)  # Prefer reasonable lengths
+                ),
             )
         if not len_pick:
-            # Last resort: allow scale line numbers
+            # Try wider range
             len_pick = best_from(
                 generic_cands,
-                lambda v, s, l, f: (f["is_scale"]) and (not f["is_radius"]) and (not f["is_thread"]) and (2.0 <= v <= 20.0),
+                lambda v, s, l, f: (
+                    (not f["is_scale"]) and 
+                    (not f["is_radius"]) and 
+                    (not f["is_thread"]) and 
+                    (not f.get("is_metric_bracket", False)) and
+                    (v >= 0.3) and
+                    (v <= 20.0)
+                ),
+            )
+        if not len_pick:
+            # Last resort: allow scale line numbers (but still filter bracket)
+            len_pick = best_from(
+                generic_cands,
+                lambda v, s, l, f: (
+                    (f["is_scale"]) and 
+                    (not f["is_radius"]) and 
+                    (not f["is_thread"]) and 
+                    (not f.get("is_metric_bracket", False)) and
+                    (v >= 0.3) and
+                    (v <= 20.0)
+                ),
             )
 
         len_val = len_pick[0] if len_pick else None

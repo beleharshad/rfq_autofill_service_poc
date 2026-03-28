@@ -26,11 +26,13 @@ class StepFromStackService:
         self.file_storage = FileStorage()
         self.stack_to_profile = StackToProfileService()
     
-    def generate_step_from_inferred_stack(self, job_id: str) -> Dict:
+    def generate_step_from_inferred_stack(self, job_id: str, bore_diameter: float = 0.0) -> Dict:
         """Generate STEP file from inferred stack.
         
         Args:
             job_id: Job identifier
+            bore_diameter: When >0, override all segment id_diameter values with this value
+                           (inches) so the STEP/GLB renders as a hollow bore part.
             
         Returns:
             Dictionary with:
@@ -89,6 +91,16 @@ class StepFromStackService:
                         "job_id": job_id
                     }
                 }
+
+            # Apply bore diameter override — when the LLM knows the real ID but the
+            # inferred_stack has id_diameter≈0 for most segments, this propagates the
+            # correct bore so the solid is rendered hollow.
+            if bore_diameter > 0.001:
+                logger.info(f"[StepFromStack] Applying bore_diameter override: {bore_diameter:.4f} in")
+                segments = [
+                    {**s, "id_diameter": max(float(s.get("id_diameter") or 0), bore_diameter)}
+                    for s in segments
+                ]
             
             # Convert stack to Profile2D
             logger.info(f"[StepFromStack] Converting {len(segments)} segments to Profile2D")

@@ -279,8 +279,9 @@ class FeatureMerger:
                 if avg_conf < 0.6:
                     warnings.append("FEATURES_CV_LOW_CONF")
 
-        # FEATURES_TEXT_ONLY: estimated scale + no CV features
-        if scale_method == "estimated" and text_features and (not cv_features or (not cv_features.holes and not cv_features.slots)):
+        # FEATURES_TEXT_ONLY: poorly-scaled geometry + no CV features
+        _poor_scale = scale_method not in ("anchor_dimension", "calibrated_from_ocr", "dpi_based")
+        if _poor_scale and text_features and (not cv_features or (not cv_features.holes and not cv_features.slots)):
             warnings.append("FEATURES_TEXT_ONLY")
 
         return list(set(warnings))  # Remove duplicates

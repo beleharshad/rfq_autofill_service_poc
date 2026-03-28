@@ -1,0 +1,257 @@
+/* LLMAnalysisPanel.css */
+
+.llm-panel {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  font-family: inherit;
+}
+
+/* Header */
+.llm-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Empty state */
+.llm-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  border: 2px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  text-align: center;
+  color: #64748b;
+}
+.llm-empty-icon { font-size: 2.5rem; }
+.llm-empty-hint { font-size: 0.85rem; color: #94a3b8; max-width: 400px; }
+
+.llm-panel-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  color: #1e293b;
+}
+
+.llm-panel-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.llm-panel-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.btn {
+  padding: 0.5rem 1.1rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+.btn-secondary {
+  background: #e2e8f0;
+  color: #334155;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: #cbd5e1;
+}
+.btn-excel {
+  background: #16a34a;
+  color: #fff;
+}
+.btn-excel:hover:not(:disabled) {
+  background: #15803d;
+}
+
+/* Error */
+.llm-error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: #b91c1c;
+  font-size: 0.875rem;
+}
+
+/* Running state */
+.llm-running {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Summary badges */
+.llm-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.llm-badge {
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.badge-ok      { background: #d1fae5; color: #065f46; }
+.badge-fail    { background: #fee2e2; color: #991b1b; }
+.badge-neutral { background: #f1f5f9; color: #334155; }
+.rec-accept    { background: #d1fae5; color: #065f46; }
+.rec-reject    { background: #fee2e2; color: #991b1b; }
+.rec-review    { background: #fef3c7; color: #92400e; }
+
+/* Sections */
+.llm-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+}
+.llm-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+  color: #1e293b;
+}
+.llm-section-title--warn {
+  color: #92400e;
+}
+
+/* Table */
+.llm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.llm-table th {
+  background: #f8fafc;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 2px solid #e2e8f0;
+}
+.llm-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.llm-table tr:hover td {
+  background: #f8fafc;
+}
+.llm-table tr.row-issue td {
+  background: #fffbeb;
+}
+.field-label {
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+}
+.null-val {
+  color: #94a3b8;
+}
+.issue-cell {
+  color: #b45309;
+  font-size: 0.8rem;
+}
+
+.badge-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid #86efac;
+  white-space: nowrap;
+}
+
+.group-header-row td {
+  background: #dbeafe !important;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0.75rem;
+}
+
+.source-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.08rem 0.35rem;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* Confidence colours */
+.conf-high { color: #15803d; font-weight: 600; }
+.conf-med  { color: #b45309; font-weight: 600; }
+.conf-low  { color: #b91c1c; font-weight: 600; }
+
+/* Issues list */
+.llm-issues-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: #7c2d12;
+}
+
+/* All OK banner */
+.llm-all-ok {
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: #065f46;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
