@@ -1,123 +1,247 @@
 # RFQ 3D View
 
-Web application for extracting manufacturing metrics from turned parts using engineering drawings and manual profile creation.
+Full-stack web application for automated RFQ (Request for Quotation) cost estimation of CNC-turned parts.  
+Upload a **STEP file** or a **PDF engineering drawing** → the system extracts dimensions, detects features, estimates material/machining costs, and exports a filled Excel RFQ sheet — with live currency conversion.
+
+---
+
+## Features
+
+| Feature | Status |
+|---|---|
+| STEP upload → geometry extraction → 3D preview | ✅ |
+| PDF upload → LLM dimension extraction (OCR + AI) | ✅ |
+| Auto-fill RFQ fields (OD, ID, Length, RM dims, weight) | ✅ |
+| Excel export with live formulas (RM weight, costs, P&F, MOQ) | ✅ |
+| Live currency exchange rate (USD → INR) | ✅ |
+| Vendor Quote Mode (cost breakdown per part) | ✅ |
+| 3D part viewer (GLB in-browser) | ✅ |
+| Hole / slot / feature detection | ✅ |
+
+---
 
 ## Project Structure
 
 ```
 RFQ_3D_View/
-├── backend/          # FastAPI Python backend
-├── frontend/         # React + TypeScript frontend
-└── (existing Python modules for pipeline)
+├── backend/                  # FastAPI Python backend
+│   ├── app/
+│   │   ├── api/              # Route handlers (jobs, rfq, pdf, llm, preview3d …)
+│   │   ├── models/           # Pydantic request/response models
+│   │   ├── services/         # Business logic (geometry, LLM, Excel export …)
+│   │   └── main.py           # App entry point
+│   ├── data/
+│   │   ├── jobs/             # Per-job working files (auto-created)
+│   │   └── rfq_estimation/   # Excel templates
+│   └── run.py                # Dev server launcher (uvicorn --reload)
+├── frontend/                 # React + TypeScript + Vite frontend
+│   └── src/
+│       ├── components/       # AutoConvertResults, LLMAnalysis, LatheViewer …
+│       ├── pages/            # JobPage, NewJobPage …
+│       └── services/         # API client, types
+└── requirements.txt          # Root-level Python deps (legacy pipeline)
 ```
+
+---
 
 ## Prerequisites
 
-- **Python 3.9+** with pip
-- **Node.js 18+** with npm
-- **Git**
+| Requirement | Version |
+|---|---|
+| Python | 3.9 + |
+| Node.js | 18 + |
+| Tesseract OCR | any (for image-PDF fallback) |
+| OpenAI **or** Google Gemini API key | — |
+
+> **Tesseract install (Windows):** Download the installer from  
+> https://github.com/UB-Mannheim/tesseract/wiki and ensure `tesseract` is on your PATH.
+
+---
 
 ## Quick Start
 
-### 1. Backend Setup
+### 1. Environment variables
+
+Create `backend/.env` (copy from the template below):
+
+```env
+# LLM provider — set ONE of these
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=AIza...
+
+# Optional — defaults shown
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+```
+
+### 2. Backend
 
 ```bash
-# Navigate to backend directory
 cd backend
 
-# Create virtual environment (recommended)
+# Create & activate virtual environment
 python -m venv venv
-
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS / Linux
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the server
+# Start the server (auto-reloads on file changes)
 python run.py
 ```
 
-The backend API will be available at:
-- **API**: http://localhost:8000
-- **Health Check**: http://localhost:8000/health
-- **API Docs**: http://localhost:8000/docs (Swagger UI)
+Backend URLs:
+- **API base**: http://localhost:8000
+- **Health check**: http://localhost:8000/health
+- **Swagger UI**: http://localhost:8000/docs
 
-### 2. Frontend Setup
+### 3. Frontend
 
 ```bash
-# Navigate to frontend directory (in a new terminal)
+# In a second terminal
 cd frontend
 
-# Install dependencies
 npm install
-
-# Run development server
 npm run dev
 ```
 
-The frontend will be available at:
-- **App**: http://localhost:5173
+Open **http://localhost:5173** in your browser.
 
-### 3. Verify Setup
+---
 
-1. Open http://localhost:5173 in your browser
-2. You should see the home page with "New Job" button
-3. Click "New Job" to navigate to the job creation page
-4. Check backend health: http://localhost:8000/health
+## Typical Workflow
+
+### STEP File → RFQ Excel
+
+1. Click **New Job** and upload a `.step` / `.stp` file.
+2. The backend extracts geometry, detects features, and renders a 3D preview.
+3. Click **Auto-fill RFQ** — dimensions are computed from the geometry envelope.
+4. Review the pre-filled fields, adjust if needed.
+5. Click **Download Excel** to get a fully-calculated RFQ spreadsheet.
+
+### PDF Drawing → RFQ Excel
+
+1. Click **New Job** and upload a PDF engineering drawing.
+2. The LLM pipeline (OCR + AI) extracts OD, ID, Length, Material, and Quantity.
+3. Extracted values appear in the **LLM Analysis** panel with confidence indicators.
+4. Click **Download Excel** — LLM dimensions are injected directly, overriding geometry estimates.
+
+> See [QUICK_START_PDF_RFQ.md](QUICK_START_PDF_RFQ.md) for a step-by-step walkthrough with screenshots.
+
+---
+
+## API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/api/v1/jobs` | Create a new job |
+| GET | `/api/v1/jobs` | List all jobs |
+| GET | `/api/v1/jobs/{job_id}` | Get job details |
+| GET | `/api/v1/jobs/{job_id}/files` | List job output files |
+| GET | `/api/v1/jobs/{job_id}/download` | Download job file |
+| DELETE | `/api/v1/jobs/{job_id}` | Delete job |
+| POST | `/api/v1/jobs/{job_id}/llm-analyze` | Trigger LLM PDF analysis |
+| GET | `/api/v1/jobs/{job_id}/llm-analysis` | Get LLM analysis result |
+| GET | `/api/v1/jobs/{job_id}/llm-analysis/export-excel` | Export Excel from LLM result |
+| GET | `/api/v1/jobs/{job_id}/3d-preview` | Serve GLB 3D model |
+| POST | `/api/v1/rfq/autofill` | Auto-fill RFQ from geometry |
+| POST | `/api/v1/rfq/export_xlsx` | Export filled RFQ Excel |
+| GET | `/api/v1/rfq/exchange_rate` | Live USD → INR exchange rate |
+| POST | `/api/v1/rfq/extract_pdf_specs` | Extract specs from a PDF file |
+| POST | `/api/v1/rfq/autofill_from_pdf` | Autofill RFQ from PDF specs |
+
+Full interactive docs: **http://localhost:8000/docs**
+
+---
+
+## Excel Export — Formula Notes
+
+The exported Excel file uses the same formulas as the original RFQ template and recalculates automatically on open (`fullCalcOnLoad = True`):
+
+| Column | Formula |
+|---|---|
+| Finish OD/ID/Length (MM) | `= Inch × 25.4` |
+| RM OD (Inch) | `= ROUND(Finish_OD + 0.1, 3)` |
+| RM ID (Inch) | `= IF(ID > 0, ROUND(MAX(0, ID − 0.05), 3), 0)` |
+| Length (Inch) — RM stock | `= Finish_Length + 0.35` |
+| RM Weight Kg | `= π/4 × (OD²−ID²) × Length × 7.86 g/cm³` (via 0.785 factor) |
+| Material Cost | `= RM Rate × RM Weight` |
+| Sub Total | `= SUM(Material + Roughing + Turning + VMC + Special + Others + Inspection)` |
+| P&F | `= Sub Total × 3%` |
+| OH & Profit | `= Sub Total × 15%` |
+| Rejection Cost | `= Sub Total × 2%` |
+| Price/Each (INR) | `= SUM(SubTotal + P&F + OH&Profit + Rejection)` |
+| Price/Each (Currency) | `= Price_INR / Exchange_Rate` |
+| MOQ Cost | `= Price/Each × Qty/MOQ` |
+| Annual Potential | `= Price/Each × Annual Qty` |
+
+Changing **any input cell** (OD, ID, Length, Rate, Qty, Exchange Rate) automatically cascades through all dependent columns.
+
+---
 
 ## Development
 
-### Backend
+### Running tests (backend)
 
-- **Entry Point**: `backend/app/main.py`
-- **Run Script**: `backend/run.py` (with auto-reload)
-- **Storage**: `backend/data/jobs/{job_id}/` (created automatically)
-
-### Frontend
-
-- **Entry Point**: `frontend/src/main.tsx`
-- **Dev Server**: `npm run dev` (Vite with HMR)
-- **Build**: `npm run build`
-
-## API Endpoints
-
-### Health Check
-```
-GET /health
+```bash
+cd backend
+pytest tests/ -v
 ```
 
-### API Documentation
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+### Building the frontend
 
-## Project Status
+```bash
+cd frontend
+npm run build      # output → frontend/dist/
+npm run preview    # serve the production build locally
+```
 
-**Current Phase**: Scaffolding Complete ✅
+### Key services
 
-- ✅ Backend FastAPI structure
-- ✅ Frontend React + Vite + TypeScript
-- ✅ Basic routing
-- ✅ CORS configuration
-- ⏳ Business logic (next phase)
+| File | Purpose |
+|---|---|
+| `backend/app/services/rfq_excel_export_service.py` | Excel template fill + formula injection |
+| `backend/app/services/llm_service.py` | OpenAI / Gemini LLM integration |
+| `backend/app/services/pdf_llm_pipeline.py` | PDF → OCR → LLM → structured dims |
+| `backend/app/services/currency_service.py` | Live FX rate fetch + caching |
+| `backend/app/services/geometry_envelope_service.py` | STEP geometry → OD/ID/Length |
+| `frontend/src/components/AutoConvertResults/AutoConvertResults.tsx` | Main results + download UI |
+| `frontend/src/components/LLMAnalysis/LLMAnalysisPanel.tsx` | LLM extraction results display |
 
-## Why We Do NOT Auto-Generate CAD Blindly
+---
 
-**Important Design Philosophy for Contributors**
+## Troubleshooting
 
-This system intentionally does **not** automatically generate CAD files (STEP) from PDFs without human confirmation. Here's why:
+| Problem | Fix |
+|---|---|
+| `Port 8000 already in use` | Change `BACKEND_PORT` in `.env` or `backend/run.py` |
+| `Module not found` | Activate the virtual environment first |
+| `CORS error in browser` | Check allowed origins in `backend/app/main.py` |
+| `Port 5173 already in use` | Vite uses the next free port automatically |
+| `npm install fails` | Run `npm cache clean --force` then retry |
+| `LLM returns no dimensions` | Check `OPENAI_API_KEY` / `GOOGLE_API_KEY` in `.env` |
+| `Tesseract not found` | Install Tesseract and add it to PATH |
+| `RM Weight shows wrong value` | Ensure the Excel file is saved with `fullCalcOnLoad`; re-download |
 
-### The Problem with PDFs
+---
 
-1. **PDFs are Ambiguous**
-   - Engineering drawings are visual representations, not precise CAD models
-   - Multiple interpretations of the same drawing are often valid
-   - Scale, units, and reference dimensions may be unclear
-   - Hidden features, tolerances, and manufacturing notes are not machine-readable
+## Design Philosophy — Human-in-the-Loop CAD
 
+This system **never auto-generates STEP files without user confirmation**.  
+PDFs are ambiguous; OCR and computer vision have inherent error rates.  
+Every inference carries a confidence score; users review and approve before any CAD or cost export is committed.
+
+```
+Upload → Inference → Confidence Scoring → Human Review → Approval → Export
+```
+
+---
+
+## License
+
+[Your License Here]
 2. **Dimensions Can Be Implied or Missing**
    - Critical dimensions may be implied through geometric relationships
    - Standard features (fillets, chamfers) may be shown but not dimensioned

@@ -1,307 +1,194 @@
-# ⚡ Quick Start: PDF-Based RFQ Auto-Fill
+# Quick Start: PDF → RFQ Excel Auto-Fill
 
-## 🎯 Goal
-Extract dimensions from PDF drawings → Auto-calculate costs → Generate Excel RFQ
+## Goal
 
-## 📋 Current Status
-
-✅ **Implemented:**
-- PDF text extraction service
-- Dimension pattern matching (OD, ID, Length, Material, Qty)
-- Auto-calculation (RM dimensions, weight, costs)
-- Excel export with vendor quote mode
-- API endpoints ready
-
-⚠️ **Your PDF Issue:**
-- File: `C:\Users\beleh\Downloads\drgs data\1\050dz0017_C.pdf`
-- Problem: **Image-based PDF** (scanned drawing, no searchable text)
-- Solution options below ⬇️
+Upload a PDF engineering drawing → LLM extracts OD, ID, Length, Material, Qty → auto-calculate costs → download a filled Excel RFQ sheet. The entire flow takes under 60 seconds per part.
 
 ---
 
-## 🚀 3 Ways to Use This Feature
+## Prerequisites
 
-### **Option 1: Manual Entry (Works Today!)** ⭐ RECOMMENDED
+Before you start:
 
-Use the existing web UI to manually enter dimensions:
-
-1. **Start backend:**
-   ```bash
-   cd backend
-   uvicorn app.main:app --reload
+1. **Backend running** — see [README.md](README.md) for setup
+2. **LLM API key** set in `backend/.env`:
+   ```env
+   OPENAI_API_KEY=sk-...       # OpenAI GPT-4o
+   # --- OR ---
+   GOOGLE_API_KEY=AIza...      # Google Gemini
    ```
-
-2. **Open frontend:**
-   ```
-   http://localhost:5173
-   ```
-
-3. **Navigate to RFQ section**
-
-4. **Enter dimensions from your PDF:**
-   - Part No: `050DZ0017`
-   - Finish OD: `1.71` inches
-   - Finish ID: `0.75` inches
-   - Finish Length: `4.25` inches
-   - Material: `65-45-12`
-   - Qty: `200`
-
-5. **Enable "Vendor Quote Mode"** ✅
-
-6. **Click "Auto-fill RFQ"**
-
-7. **Export to Excel** ✅
-
-**Result:** Excel file with all calculations done automatically!
+3. **Tesseract** installed and on PATH (for image/scanned PDFs)
+   Windows: https://github.com/UB-Mannheim/tesseract/wiki
 
 ---
 
-### **Option 2: API Call (Programmatic)**
+## Option 1 — Web UI (Recommended)
 
-If you have multiple parts, use a Python script:
+### Step 1 — Create a job
+
+1. Open **http://localhost:5173**
+2. Click **New Job**
+3. Upload your **PDF engineering drawing** (or STEP file)
+4. Wait for the job to initialize
+
+### Step 2 — LLM Analysis
+
+Once the job page loads:
+
+1. Go to the **LLM Analysis** panel
+2. Click **Analyze with AI**
+3. The pipeline will:
+   - Extract text from the PDF (pdfplumber → EasyOCR fallback for scanned files)
+   - Send to LLM (GPT-4o or Gemini) for structured dimension extraction
+   - Return: `OD`, `ID`, `Length`, `Material`, `Quantity`, confidence scores
+4. Review the extracted values — green = high confidence, amber = low confidence
+
+### Step 3 — Download Excel
+
+1. In the **Auto Convert Results** panel, click **Download Excel**
+2. The system:
+   - Passes the LLM-extracted dimensions as `dimension_overrides`
+   - Fills the RFQ template with correct inch values (3 decimal places)
+   - Injects Excel formulas for all calculated columns
+   - Returns a `.xlsx` file ready to open in Excel
+3. Open the file — all formula cells auto-recalculate on open
+
+---
+
+## Option 2 — API (Programmatic / Batch)
+
+Useful for processing multiple parts from a script.
+
+### Single PDF → Excel
 
 ```python
 import requests
 
-# YOUR DIMENSIONS (copied from PDF)
-part = {
-    "part_no": "050DZ0017",
-    "finish_od_in": 1.71,
-    "finish_id_in": 0.75,
-    "finish_len_in": 4.25,
-}
+BASE = "http://localhost:8000/api/v1"
 
-# Build request
-request_data = {
+# 1. Create a job and upload the PDF
+with open("your_drawing.pdf", "rb") as f:
+    job = requests.post(f"{BASE}/jobs", files={"file": f}).json()
+
+job_id = job["job_id"]
+print(f"Job created: {job_id}")
+
+# 2. Trigger LLM analysis
+resp = requests.post(f"{BASE}/llm/jobs/{job_id}/llm-analyze")
+print("LLM analysis started:", resp.status_code)
+
+# 3. Poll for result (analysis runs in background)
+import time
+for _ in range(30):
+    result = requests.get(f"{BASE}/llm/jobs/{job_id}/llm-analysis").json()
+    if not result.get("pending"):
+        break
+    time.sleep(2)
+
+extracted = result.get("extracted", {})
+print("Extracted dimensions:", extracted)
+# e.g. {'od_in': 1.88, 'id_in': 1.019, 'length_in': 4.25, 'material': 'EN8', 'qty': 500}
+
+# 4. Export Excel with LLM overrides
+export_payload = {
     "rfq_id": "RFQ-2025-01369",
-    "part_no": part["part_no"],
-    "source": {
-        "part_summary": {
-            "units": {"length": "in"},
-            "z_range": [0.0, part["finish_len_in"]],
-            "segments": [{
-                "z_start": 0.0,
-                "z_end": part["finish_len_in"],
-                "od_diameter": part["finish_od_in"],
-                "id_diameter": part["finish_id_in"],
-                "confidence": 0.95,
-                "flags": []
-            }],
-            "inference_metadata": {"overall_confidence": 0.95},
-            "scale_report": {"method": "anchor_dimension", "validation_passed": True}
-        },
-        "step_metrics": None,
-        "job_id": None
-    },
-    "tolerances": {
-        "rm_od_allowance_in": 0.26,
-        "rm_len_allowance_in": 0.35
-    },
+    "part_no": "050CE0004",
     "mode": "ENVELOPE",
     "vendor_quote_mode": True,
+    "source": {
+        "job_id": job_id,
+        "part_summary": None,
+        "step_metrics": None
+    },
+    "tolerances": {
+        "rm_od_allowance_in": 0.10,
+        "rm_len_allowance_in": 0.35
+    },
     "cost_inputs": {
         "rm_rate_per_kg": 100.0,
-        "turning_rate_per_min": 7.5,
-        "roughing_cost": 162.0,
-        "inspection_cost": 10.0,
-        "material_density_kg_m3": 7200.0
+        "currency": "USD",
+        "qty_moq": extracted.get("qty", 100),
+        "annual_potential_qty": extracted.get("qty", 100)
+    },
+    "dimension_overrides": {
+        "finish_od_in": extracted.get("od_in"),
+        "finish_id_in": extracted.get("id_in"),
+        "finish_len_in": extracted.get("length_in")
     }
 }
 
-# Call API
-response = requests.post(
-    "http://localhost:8000/api/v1/rfq/export_xlsx",
-    json=request_data
-)
+xlsx = requests.post(f"{BASE}/rfq/export_xlsx", json=export_payload)
+with open("RFQ_output.xlsx", "wb") as f:
+    f.write(xlsx.content)
 
-# Save Excel
-with open(f"RFQ_{part['part_no']}_auto.xlsx", "wb") as f:
-    f.write(response.content)
-
-print(f"✅ Excel generated: RFQ_{part['part_no']}_auto.xlsx")
+print("✅ Excel saved: RFQ_output.xlsx")
 ```
 
-**Run:**
-```bash
-python your_script.py
-```
-
----
-
-### **Option 3: Add OCR for Image PDFs** (Future Enhancement)
-
-If you have many scanned PDFs, we can add OCR:
-
-1. **Install dependency:**
-   ```bash
-   pip install pdf2image poppler-utils
-   ```
-
-2. **Update `PDFSpecExtractor`** (in `backend/app/services/pdf_spec_extractor.py`):
+### Exchange Rate Check
 
 ```python
-def _extract_text_with_ocr(self, pdf_path: str) -> str:
-    """Extract text from image-based PDF using OCR."""
-    try:
-        import easyocr
-        from pdf2image import convert_from_path
-        
-        reader = easyocr.Reader(['en'])
-        
-        # Convert PDF to images
-        images = convert_from_path(pdf_path, dpi=300)
-        
-        text = ""
-        for img in images:
-            # OCR each page
-            results = reader.readtext(img)
-            for (bbox, text_content, prob) in results:
-                text += text_content + " "
-        
-        return text.upper()
-    
-    except Exception as e:
-        print(f"OCR failed: {e}")
-        return ""
-
-def _extract_text_from_pdf(self, pdf_path: str) -> str:
-    """Extract text from PDF, with OCR fallback."""
-    # Try regular text extraction first
-    text = ""
-    try:
-        import pdfplumber
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-    except:
-        pass
-    
-    # If no text found, try OCR
-    if not text or len(text) < 50:
-        print("Regular extraction failed, trying OCR...")
-        text = self._extract_text_with_ocr(pdf_path)
-    
-    return text.upper()
+rate = requests.get(f"{BASE}/rfq/exchange_rate").json()
+print(f"1 USD = {rate['rate']} INR  (source: {rate['source']})")
 ```
 
-3. **Test again:**
-   ```bash
-   python backend/test_pdf_extraction.py
-   ```
+---
+
+## What Gets Filled in Excel
+
+| Column | Source |
+|---|---|
+| Finish OD (Inch) | LLM extracted `od_in` |
+| Finish ID (Inch) | LLM extracted `id_in` |
+| Finish Length (Inch) | LLM extracted `length_in` |
+| Finish OD/ID/Length (MM) | Formula: `= Inch × 25.4` |
+| RM OD (Inch) | Formula: `= ROUND(Finish_OD + 0.1, 3)` |
+| RM ID (Inch) | Formula: `= IF(ID>0, ROUND(MAX(0, ID−0.05), 3), 0)` |
+| RM Length (Inch) | Formula: `= Finish_Length + 0.35` |
+| RM Weight Kg | Formula: `= density × (OD²−ID²) × Length` |
+| Material Cost | Formula: `= RM Rate × RM Weight` |
+| Sub Total | Formula: `= SUM(all cost columns)` |
+| P&F | Formula: `= SubTotal × 3%` |
+| OH & Profit | Formula: `= SubTotal × 15%` |
+| Rejection | Formula: `= SubTotal × 2%` |
+| Price/Each (INR) | Formula: `= SUM(SubTotal + markups)` |
+| Price/Each (Currency) | Formula: `= Price_INR / Exchange_Rate` |
+| MOQ Cost | Formula: `= Price/Each × Qty/MOQ` |
+
+**All formulas recalculate live** — change any input cell and dependent columns update instantly.
 
 ---
 
-## 📊 Expected Output
+## Troubleshooting
 
-For part `050DZ0017`:
-
-### **Input (from PDF):**
-- Finish OD: `1.71"`
-- Finish ID: `0.75"`
-- Finish Length: `4.25"`
-
-### **Auto-Calculated:**
-- RM OD: `1.97"` (1.71 + 0.26 allowance)
-- RM Length: `4.60"` (4.25 + 0.35 allowance)
-- RM Weight: `~1.80 kg`
-- Material Cost: `~$180`
-- Turning Time: `~40 min`
-- Total Estimate: `~$922`
-
-### **Excel Output:**
-All values populated in the template, preserving formulas.
+| Problem | Solution |
+|---|---|
+| LLM returns empty dimensions | Check `OPENAI_API_KEY` / `GOOGLE_API_KEY` in `backend/.env` |
+| Scanned PDF, no text detected | Install Tesseract and ensure it's on PATH |
+| Wrong OD/ID in Excel | Check the LLM Analysis panel — confirm extracted values before downloading |
+| Excel shows `#VALUE!` | Re-download — the formula guard was likely triggered by a template cell |
+| `RM Weight` shows wrong value | Re-download — old formula was replaced in the latest build |
+| Exchange rate not updating | Backend caches FX rate for 1 hour; check `/api/v1/rfq/exchange_rate` |
 
 ---
 
-## 🧪 Testing
+## Key Files
 
-### **Test Extraction (when OCR is ready):**
-```bash
-cd backend
-python test_pdf_extraction.py
-```
-
-### **Test Full Workflow (manual entry):**
-```bash
-python generate_excel_from_pdf.py
-```
-(Update script to use manual dimensions instead of PDF)
-
----
-
-## 📁 Key Files
-
-### **Backend:**
-- `app/services/pdf_spec_extractor.py` - PDF extraction service
-- `app/api/rfq.py` - API endpoints
-- `test_pdf_extraction.py` - Test script
-- `generate_excel_from_pdf.py` - Complete workflow
-
-### **Documentation:**
-- `PDF_AUTO_FILL_GUIDE.md` - Full user guide
-- `PDF_EXTRACTION_IMPLEMENTATION_SUMMARY.md` - Technical details
-- `QUICK_START_PDF_RFQ.md` (this file) - Quick start
+| File | Purpose |
+|---|---|
+| `backend/app/services/pdf_llm_pipeline.py` | PDF → OCR → LLM → structured dims |
+| `backend/app/services/llm_service.py` | OpenAI / Gemini LLM wrapper |
+| `backend/app/services/rfq_excel_export_service.py` | Excel template fill + formula injection |
+| `backend/app/services/currency_service.py` | Live FX rate with caching |
+| `backend/app/api/llm_pdf.py` | `/llm-analyze`, `/llm-analysis` endpoints |
+| `backend/app/api/rfq.py` | `/rfq/export_xlsx`, `/rfq/exchange_rate` endpoints |
+| `frontend/src/components/LLMAnalysis/LLMAnalysisPanel.tsx` | LLM results UI |
+| `frontend/src/components/AutoConvertResults/AutoConvertResults.tsx` | Download Excel button |
 
 ---
 
-## 🎬 Next Steps
+## Full API Docs
 
-### **Right Now (5 min):**
-1. Copy your dimensions from PDF to a text file
-2. Use Option 1 (Manual Entry) in the web UI
-3. Generate Excel ✅
-4. Verify values match your expectations
-
-### **This Week:**
-1. Collect all PDF files for your RFQ batch
-2. For each, manually note dimensions
-3. Batch process using Option 2 (API script)
-4. Generate all Excel files at once
-
-### **Next Sprint (if needed):**
-1. Add OCR support (Option 3)
-2. Test with your scanned PDFs
-3. Automate the full workflow
-
----
-
-## ❓ FAQ
-
-**Q: Why can't it read my PDF?**  
-A: Your PDF is image-based (scanned). Need OCR or text-based PDFs.
-
-**Q: Can I batch process multiple parts?**  
-A: Yes! Use Option 2 (API script) with a loop.
-
-**Q: Will it overwrite my Excel formulas?**  
-A: No! Only fills in input cells, preserves all formulas.
-
-**Q: What if OCR gets the wrong number?**  
-A: System shows confidence scores. Review low-confidence values manually.
-
-**Q: Can I adjust the cost inputs?**  
-A: Yes! Pass different `cost_inputs` in the API call or UI.
-
----
-
-## 📞 Support
-
-Need help? Check:
-1. `PDF_AUTO_FILL_GUIDE.md` - Detailed guide
-2. `PDF_EXTRACTION_IMPLEMENTATION_SUMMARY.md` - Technical details
-3. API docs: `http://localhost:8000/docs` (when backend is running)
-
----
-
-## ✅ Summary
-
-**What works:** ✅ Manual entry → Auto-calculate → Excel export  
-**What's next:** ⏳ Add OCR for image-based PDFs  
-**Your action:** 📝 Use Option 1 (Manual Entry) today!
-
-**Ready to go!** 🚀
+http://localhost:8000/docs
 
 
 
