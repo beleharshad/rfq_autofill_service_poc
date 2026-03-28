@@ -1,17 +1,192 @@
-# Quick Start: PDF → RFQ Excel Auto-Fill
+# From PDF Drawing to Priced RFQ in Under 60 Seconds
 
-## Goal
-
-Upload a PDF engineering drawing → LLM extracts OD, ID, Length, Material, Qty → auto-calculate costs → download a filled Excel RFQ sheet. The entire flow takes under 60 seconds per part.
+This guide walks through the complete end-to-end flow: upload an engineering drawing → AI extracts dimensions → fully-calculated Excel RFQ downloads to your machine.
 
 ---
 
-## Prerequisites
+## Before You Begin
 
-Before you start:
+| Requirement | Check |
+|---|---|
+| Backend running on port 8000 | `curl http://localhost:8000/health` |
+| LLM key in `backend/.env` | `OPENAI_API_KEY=sk-...` or `GOOGLE_API_KEY=AIza...` |
+| Tesseract on PATH (scanned PDFs) | `tesseract --version` |
 
-1. **Backend running** — see [README.md](README.md) for setup
-2. **LLM API key** set in `backend/.env`:
+First time? Run through the [README](README.md) setup (≈5 min).
+
+---
+
+## The 3-Step Flow
+
+```
+1. Upload PDF           →   Job created, file stored
+2. Analyze with AI      →   LLM extracts OD, ID, Length, Material, Qty
+3. Download Excel       →   Vendor-ready .xlsx with all formulas live
+```
+
+---
+
+## Step 1 — Upload Your Drawing
+
+1. Open **http://localhost:5173**
+2. Click **New Job**
+3. Drag and drop your PDF engineering drawing (or `.step` file)
+4. The system creates a job and stores the file — you land on the **Job Page**
+
+**Supported inputs:**
+- Text-based PDFs (CAD-generated drawings) — fastest
+- Scanned / image PDFs — OCR pipeline runs automatically (EasyOCR → Tesseract fallback)
+- STEP / STP files — geometry extracted directly from 3D solid model
+
+---
+
+## Step 2 — AI Dimension Extraction
+
+On the Job Page, open the **LLM Analysis** panel:
+
+1. Click **Analyze with AI**
+2. Processing takes 5–15 seconds — the pipeline runs OCR → LLM in the background
+3. Result appears with per-field confidence:
+
+| Field | Example Output | Confidence |
+|---|---|---|
+| Finish OD | `1.880 in` | High |
+| Finish ID | `1.019 in` | High |
+| Finish Length | `4.250 in` | Medium |
+| Material | `EN8` | High |
+| Quantity | `500` | High |
+
+- **Green** — high confidence, use as-is
+- **Amber** — review against the drawing before downloading
+- Any field can be manually corrected in the panel before export
+
+---
+
+## Step 3 — Download the RFQ Excel
+
+In the **Auto Convert Results** panel, click **Download Excel**.
+
+The system:
+- Injects LLM-extracted dimensions as authoritative values (they override any geometry estimate)
+- Computes RM blank dimensions, weight, material cost, machining costs, markups, and pricing
+- Fetches the **live exchange rate** and embeds it with source + timestamp
+- Exports a `.xlsx` with every cost column backed by a live Excel formula
+
+Open the file in Excel — **all cells recalculate on open**. Change any input (rate, quantity, exchange rate) and the entire sheet updates instantly.
+
+### What the Excel contains
+
+| Column | Value Source |
+|---|---|
+| Finish OD / ID / Length | LLM extraction (or geometry if no PDF) |
+| MM conversions | Formula: `= Inch × 25.4` |
+| RM OD | Formula: `= ROUND(OD + 0.1", 3)` — standard stock allowance |
+| RM Stock Length | Formula: `= Length + 0.35"` — facing + parting allowance |
+| RM Weight Kg | Formula: `= (OD² − ID²) × L × 0.785 × 7.86 / 1,000,000` |
+| Material Cost | Formula: `= RM Rate × RM Weight` |
+| Turning / VMC / Special | Computed from machining time rates |
+| P&F, OH & Profit, Rejection | 3% / 15% / 2% of Sub Total |
+| Price/Each (INR & Currency) | Divided by live exchange rate |
+| MOQ Cost & Annual Potential | Qty-driven formula columns |
+
+---
+
+## Batch Processing via API
+
+For high-volume RFQ batches, drive the pipeline programmatically:
+
+```python
+import requests, time
+
+BASE = "http://localhost:8000/api/v1"
+
+def pdf_to_rfq_excel(pdf_path: str, part_no: str, rfq_id: str) -> bytes:
+    # 1. Upload
+    with open(pdf_path, "rb") as f:
+        job = requests.post(f"{BASE}/jobs", files={"file": f}).json()
+    job_id = job["job_id"]
+
+    # 2. Analyze
+    requests.post(f"{BASE}/llm/jobs/{job_id}/llm-analyze")
+
+    # 3. Poll (typical: 5–15 s)
+    for _ in range(30):
+        result = requests.get(f"{BASE}/llm/jobs/{job_id}/llm-analysis").json()
+        if not result.get("pending"):
+            break
+        time.sleep(2)
+
+    ext = result.get("extracted", {})
+
+    # 4. Export
+    payload = {
+        "rfq_id": rfq_id,
+        "part_no": part_no,
+        "mode": "ENVELOPE",
+        "vendor_quote_mode": True,
+        "source": {"job_id": job_id, "part_summary": None, "step_metrics": None},
+        "tolerances": {"rm_od_allowance_in": 0.10, "rm_len_allowance_in": 0.35},
+        "cost_inputs": {
+            "rm_rate_per_kg": 100.0,
+            "currency": "USD",
+            "qty_moq": ext.get("qty", 100),
+            "annual_potential_qty": ext.get("qty", 100),
+        },
+        "dimension_overrides": {
+            "finish_od_in":  ext.get("od_in"),
+            "finish_id_in":  ext.get("id_in"),
+            "finish_len_in": ext.get("length_in"),
+        },
+    }
+    return requests.post(f"{BASE}/rfq/export_xlsx", json=payload).content
+
+
+# Process a batch
+parts = [
+    ("drawings/050CE0004.pdf", "050CE0004"),
+    ("drawings/050DZ0017.pdf", "050DZ0017"),
+    ("drawings/060AB0033.pdf", "060AB0033"),
+]
+
+for pdf, part in parts:
+    xlsx = pdf_to_rfq_excel(pdf, part, "RFQ-2025-01369")
+    with open(f"output/RFQ_{part}.xlsx", "wb") as f:
+        f.write(xlsx)
+    print(f"✓  {part}  →  output/RFQ_{part}.xlsx")
+```
+
+50 parts. 50 Excel files. No manual spreadsheet work.
+
+---
+
+## Checking the Live Exchange Rate
+
+```python
+rate = requests.get("http://localhost:8000/api/v1/rfq/exchange_rate").json()
+# {"rate": 83.5, "source": "live", "timestamp": "2026-03-28T10:15:00Z", "currency": "USD"}
+print(f"1 USD = {rate['rate']} INR  ({rate['source']} · {rate['timestamp']})")
+```
+
+The rate is fetched from an external FX API, cached for 1 hour, and embedded in every exported Excel with source and timestamp — auditable by finance teams.
+
+---
+
+## Troubleshooting
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| LLM Analysis shows empty dims | Missing API key | Add `OPENAI_API_KEY` or `GOOGLE_API_KEY` to `backend/.env` |
+| "pending" never clears | Server restarted mid-job | Refresh page; backend clears stuck jobs on startup |
+| Scanned PDF — no text extracted | Tesseract not on PATH | Install Tesseract; confirm with `tesseract --version` |
+| Excel `RM Weight` looks wrong | Stale formula from template | Re-download; latest build always overwrites template formulas |
+| Exchange rate stale | Cache not expired | Wait 1h or call `GET /api/v1/rfq/exchange_rate` to verify |
+| Wrong OD in Excel | Geometry estimate used instead of LLM | Check LLM panel — ensure extraction succeeded before downloading |
+
+---
+
+## Interactive API Docs
+
+http://localhost:8000/docs
    ```env
    OPENAI_API_KEY=sk-...       # OpenAI GPT-4o
    # --- OR ---

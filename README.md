@@ -1,133 +1,206 @@
-# RFQ 3D View
+# RFQ Autofill — AI-Powered Manufacturing Cost Estimation
 
-Full-stack web application for automated RFQ (Request for Quotation) cost estimation of CNC-turned parts.  
-Upload a **STEP file** or a **PDF engineering drawing** → the system extracts dimensions, detects features, estimates material/machining costs, and exports a filled Excel RFQ sheet — with live currency conversion.
+> **From engineering drawing to fully-priced RFQ in under 60 seconds.**
+
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688?logo=fastapi)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://typescriptlang.org)
+[![LLM](https://img.shields.io/badge/LLM-GPT--4o%20%7C%20Gemini-orange)](https://openai.com)
 
 ---
 
-## Features
+## The Problem We Solve
 
-| Feature | Status |
+Manufacturing procurement teams spend **4–8 hours per RFQ** manually reading engineering drawings, transcribing dimensions into spreadsheets, computing raw-material weights, and recalculating cost breakdowns — a process that is:
+
+- **Slow** — engineers context-switch between CAD viewers, PDFs, and Excel for every part
+- **Error-prone** — manual transcription creates costly quoting mistakes
+- **Unscalable** — a single RFQ batch of 50 parts can consume a full work-week
+- **Currency-blind** — exchange rates are looked up ad-hoc and go stale
+
+## Our Solution
+
+**RFQ Autofill** is an AI-native web platform that eliminates that bottleneck. Upload a STEP file or a PDF drawing — our system does the rest:
+
+```
+Upload (STEP or PDF)
+    ↓
+AI Dimension Extraction  ←  LLM (GPT-4o / Gemini) + OCR
+    ↓
+Geometry Analysis        ←  3D feature detection (holes, slots, turned profiles)
+    ↓
+Cost Computation         ←  RM weight, material cost, machining, markups
+    ↓
+Live Currency Conversion ←  Real-time FX rate (USD ↔ INR, cached 1h)
+    ↓
+Excel RFQ Export         ←  Vendor-ready spreadsheet, all formulas live
+```
+
+What used to take hours now takes **under 60 seconds**.
+
+---
+
+## Capabilities
+
+| Capability | Detail |
 |---|---|
-| STEP upload → geometry extraction → 3D preview | ✅ |
-| PDF upload → LLM dimension extraction (OCR + AI) | ✅ |
-| Auto-fill RFQ fields (OD, ID, Length, RM dims, weight) | ✅ |
-| Excel export with live formulas (RM weight, costs, P&F, MOQ) | ✅ |
-| Live currency exchange rate (USD → INR) | ✅ |
-| Vendor Quote Mode (cost breakdown per part) | ✅ |
-| 3D part viewer (GLB in-browser) | ✅ |
-| Hole / slot / feature detection | ✅ |
+| **STEP → 3D Geometry** | Parses solid models, extracts OD/ID/Length envelope, detects turned profile, holes, and slots |
+| **PDF → AI Extraction** | OCR (EasyOCR/Tesseract) + LLM reads any engineering drawing — text-based or fully scanned |
+| **Intelligent Dimension Override** | LLM-extracted values take precedence over geometry estimates, ensuring drawing intent is preserved |
+| **Live Excel Export** | Exports vendor-ready `.xlsx` with full formula chain — change any cell and everything cascades |
+| **Real-time FX Rate** | Live USD → INR conversion via external API, with 1-hour caching and graceful fallback |
+| **Vendor Quote Mode** | Per-part cost breakdown: material, roughing, turning, VMC, special process, OH&P, rejection |
+| **In-browser 3D Viewer** | Interactive GLB model rendered directly in the browser — no plugin required |
+| **REST API** | Every feature is API-first — integrate with ERP, PLM, or procurement portals |
 
 ---
 
 ## Project Structure
 
+---
+
+## How It Works
+
+### Mode 1 — STEP File Upload
+
+Upload any `.step` or `.stp` solid model. The system:
+
+1. Parses the 3D geometry with `trimesh` and custom lathe-profile extraction
+2. Detects the maximum OD, bore ID, overall length, holes, slots, and machined features
+3. Renders an interactive 3D GLB model in the browser (no CAD software required)
+4. Computes finish dimensions → raw material blank dimensions (OD + 0.1", length + 0.35")
+5. Calculates RM weight using the exact steel density formula `((OD² − ID²) × L × 0.785 × 7.86) / 1,000,000`
+6. Exports a fully-priced vendor-ready Excel RFQ
+
+### Mode 2 — PDF Drawing Upload
+
+Upload any engineering drawing — searchable or fully scanned. The system:
+
+1. Extracts text via `pdfplumber`; falls back to EasyOCR + Tesseract for image-based PDFs
+2. Sends extracted content to **GPT-4o or Google Gemini** for structured dimension extraction
+3. Returns `OD`, `ID`, `Length`, `Material`, `Quantity` with **confidence scores** per field
+4. User reviews extracted values in the LLM Analysis panel before committing
+5. LLM-extracted dimensions are passed as authoritative overrides — geometry estimates never shadow drawing intent
+6. Same Excel export pipeline as Mode 1
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| **Backend API** | FastAPI + uvicorn | Async, production-grade, auto-generates OpenAPI docs |
+| **Geometry engine** | trimesh + custom lathe extractor | Handles real-world STEP files; extracts turned-part profiles |
+| **OCR** | EasyOCR + Tesseract | Dual-engine redundancy; handles degraded scans |
+| **LLM** | OpenAI GPT-4o / Google Gemini | Provider-agnostic; swap without code changes |
+| **Excel export** | openpyxl (formula-injected) | Live formula chain; `fullCalcOnLoad` — any cell edit cascades |
+| **Currency** | Live FX API + 1h cache | Fresh rates; graceful fallback prevents export failures |
+| **Frontend** | React 18 + TypeScript + Vite | Type-safe, HMR dev experience, production build optimised |
+| **3D viewer** | Three.js GLB renderer | In-browser; no plugin; works on every OS |
+
+---
+
+## Architecture
+
 ```
-RFQ_3D_View/
-├── backend/                  # FastAPI Python backend
-│   ├── app/
-│   │   ├── api/              # Route handlers (jobs, rfq, pdf, llm, preview3d …)
-│   │   ├── models/           # Pydantic request/response models
-│   │   ├── services/         # Business logic (geometry, LLM, Excel export …)
-│   │   └── main.py           # App entry point
-│   ├── data/
-│   │   ├── jobs/             # Per-job working files (auto-created)
-│   │   └── rfq_estimation/   # Excel templates
-│   └── run.py                # Dev server launcher (uvicorn --reload)
-├── frontend/                 # React + TypeScript + Vite frontend
-│   └── src/
-│       ├── components/       # AutoConvertResults, LLMAnalysis, LatheViewer …
-│       ├── pages/            # JobPage, NewJobPage …
-│       └── services/         # API client, types
-└── requirements.txt          # Root-level Python deps (legacy pipeline)
+┌─────────────────────────────────────────────────────────┐
+│                   Browser (React + TypeScript)           │
+│  ┌────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+│  │  New Job   │  │  Job Page    │  │  3D Viewer      │  │
+│  │  Upload UI │  │  LLM Panel   │  │  (Three.js GLB) │  │
+│  └────────────┘  └──────────────┘  └─────────────────┘  │
+└──────────────────────────┬──────────────────────────────┘
+                           │ REST / JSON
+┌──────────────────────────▼──────────────────────────────┐
+│               FastAPI Backend (Python 3.9+)              │
+│                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │  jobs API   │  │   rfq API    │  │  llm_pdf API   │  │
+│  └──────┬──────┘  └──────┬───────┘  └───────┬────────┘  │
+│         │                │                  │            │
+│  ┌──────▼──────────────────────────────────▼────────┐   │
+│  │                  Service Layer                    │   │
+│  │  geometry_envelope  │  rfq_excel_export           │   │
+│  │  pdf_llm_pipeline   │  currency_service           │   │
+│  │  llm_service        │  feature_detection          │   │
+│  └───────────────────────────────────────────────────┘   │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  External                                         │   │
+│  │  OpenAI GPT-4o  │  Gemini  │  FX Rate API        │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Prerequisites
+## The Excel Output — A Precision Instrument
 
-| Requirement | Version |
+The exported `.xlsx` is not a static report. Every calculation is encoded as a **live Excel formula** — vendors and engineers can adjust any input and the entire sheet recalculates instantly:
+
+| Column | Formula |
 |---|---|
-| Python | 3.9 + |
-| Node.js | 18 + |
-| Tesseract OCR | any (for image-PDF fallback) |
-| OpenAI **or** Google Gemini API key | — |
+| Finish OD / ID / Length (MM) | `= Inch × 25.4` |
+| RM OD | `= ROUND(Finish_OD + 0.1, 3)` — standard stock allowance |
+| RM ID | `= IF(ID > 0, ROUND(MAX(0, ID − 0.05), 3), 0)` |
+| RM Stock Length | `= Finish_Length + 0.35` — facing + parting allowance |
+| **RM Weight Kg** | `= ((OD×25.4)²×(L×25.4)×0.785×7.86)/1,000,000 − bore` |
+| Material Cost | `= RM Rate × RM Weight` |
+| Sub Total | `= Σ(Material + Roughing + Turning + VMC + Special + Others + Inspection)` |
+| P&F | `= Sub Total × 3%` |
+| OH & Profit | `= Sub Total × 15%` |
+| Rejection Provision | `= Sub Total × 2%` |
+| **Price / Each (INR)** | `= Sub Total + all markups` |
+| **Price / Each (Currency)** | `= INR Price ÷ Live Exchange Rate` |
+| MOQ Cost | `= Price/Each × Qty/MOQ` |
+| Annual Potential | `= Price/Each × Annual Qty` |
 
-> **Tesseract install (Windows):** Download the installer from  
-> https://github.com/UB-Mannheim/tesseract/wiki and ensure `tesseract` is on your PATH.
+Change the RM Rate, tweak the Qty, update the exchange rate — every downstream cell updates automatically.
 
 ---
 
 ## Quick Start
 
-### 1. Environment variables
+### Prerequisites
 
-Create `backend/.env` (copy from the template below):
+| Requirement | Notes |
+|---|---|
+| Python 3.9+ | `python --version` |
+| Node.js 18+ | `node --version` |
+| Tesseract OCR | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) — add to PATH |
+| OpenAI **or** Gemini API key | Set in `backend/.env` |
 
-```env
-# LLM provider — set ONE of these
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=AIza...
+### 1. Configure environment
 
-# Optional — defaults shown
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=8000
+```bash
+# backend/.env
+OPENAI_API_KEY=sk-...        # OpenAI GPT-4o
+# GOOGLE_API_KEY=AIza...     # or Google Gemini
 ```
 
-### 2. Backend
+### 2. Start the backend
 
 ```bash
 cd backend
-
-# Create & activate virtual environment
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS / Linux
-
-# Install dependencies
+python -m venv venv && venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-
-# Start the server (auto-reloads on file changes)
 python run.py
 ```
 
-Backend URLs:
-- **API base**: http://localhost:8000
-- **Health check**: http://localhost:8000/health
-- **Swagger UI**: http://localhost:8000/docs
+→ API live at **http://localhost:8000** · Docs at **http://localhost:8000/docs**
 
-### 3. Frontend
+### 3. Start the frontend
 
 ```bash
-# In a second terminal
 cd frontend
-
 npm install
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+→ App live at **http://localhost:5173**
 
----
-
-## Typical Workflow
-
-### STEP File → RFQ Excel
-
-1. Click **New Job** and upload a `.step` / `.stp` file.
-2. The backend extracts geometry, detects features, and renders a 3D preview.
-3. Click **Auto-fill RFQ** — dimensions are computed from the geometry envelope.
-4. Review the pre-filled fields, adjust if needed.
-5. Click **Download Excel** to get a fully-calculated RFQ spreadsheet.
-
-### PDF Drawing → RFQ Excel
-
-1. Click **New Job** and upload a PDF engineering drawing.
-2. The LLM pipeline (OCR + AI) extracts OD, ID, Length, Material, and Quantity.
-3. Extracted values appear in the **LLM Analysis** panel with confidence indicators.
-4. Click **Download Excel** — LLM dimensions are injected directly, overriding geometry estimates.
-
-> See [QUICK_START_PDF_RFQ.md](QUICK_START_PDF_RFQ.md) for a step-by-step walkthrough with screenshots.
+> Full walkthrough with the PDF workflow: [QUICK_START_PDF_RFQ.md](QUICK_START_PDF_RFQ.md)
 
 ---
 
@@ -135,187 +208,42 @@ Open **http://localhost:5173** in your browser.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/health` | Health check |
-| POST | `/api/v1/jobs` | Create a new job |
-| GET | `/api/v1/jobs` | List all jobs |
-| GET | `/api/v1/jobs/{job_id}` | Get job details |
-| GET | `/api/v1/jobs/{job_id}/files` | List job output files |
-| GET | `/api/v1/jobs/{job_id}/download` | Download job file |
-| DELETE | `/api/v1/jobs/{job_id}` | Delete job |
-| POST | `/api/v1/jobs/{job_id}/llm-analyze` | Trigger LLM PDF analysis |
-| GET | `/api/v1/jobs/{job_id}/llm-analysis` | Get LLM analysis result |
-| GET | `/api/v1/jobs/{job_id}/llm-analysis/export-excel` | Export Excel from LLM result |
-| GET | `/api/v1/jobs/{job_id}/3d-preview` | Serve GLB 3D model |
-| POST | `/api/v1/rfq/autofill` | Auto-fill RFQ from geometry |
-| POST | `/api/v1/rfq/export_xlsx` | Export filled RFQ Excel |
-| GET | `/api/v1/rfq/exchange_rate` | Live USD → INR exchange rate |
-| POST | `/api/v1/rfq/extract_pdf_specs` | Extract specs from a PDF file |
-| POST | `/api/v1/rfq/autofill_from_pdf` | Autofill RFQ from PDF specs |
+| `GET` | `/health` | Service health check |
+| `POST` | `/api/v1/jobs` | Create job, upload STEP or PDF |
+| `GET` | `/api/v1/jobs/{id}` | Job status + metadata |
+| `GET` | `/api/v1/jobs/{id}/3d-preview` | Stream GLB model |
+| `POST` | `/api/v1/llm/jobs/{id}/llm-analyze` | Trigger async LLM extraction |
+| `GET` | `/api/v1/llm/jobs/{id}/llm-analysis` | Poll / retrieve LLM result |
+| `GET` | `/api/v1/llm/jobs/{id}/llm-analysis/export-excel` | Excel from LLM result |
+| `POST` | `/api/v1/rfq/autofill` | Autofill from geometry |
+| `POST` | `/api/v1/rfq/export_xlsx` | Export filled RFQ Excel |
+| `GET` | `/api/v1/rfq/exchange_rate` | Live USD → INR rate |
+| `POST` | `/api/v1/rfq/autofill_from_pdf` | Full PDF → autofill pipeline |
 
-Full interactive docs: **http://localhost:8000/docs**
+Interactive Swagger UI: **http://localhost:8000/docs**
 
 ---
 
-## Excel Export — Formula Notes
+## Differentiation — Why This Is Hard to Replicate
 
-The exported Excel file uses the same formulas as the original RFQ template and recalculates automatically on open (`fullCalcOnLoad = True`):
-
-| Column | Formula |
-|---|---|
-| Finish OD/ID/Length (MM) | `= Inch × 25.4` |
-| RM OD (Inch) | `= ROUND(Finish_OD + 0.1, 3)` |
-| RM ID (Inch) | `= IF(ID > 0, ROUND(MAX(0, ID − 0.05), 3), 0)` |
-| Length (Inch) — RM stock | `= Finish_Length + 0.35` |
-| RM Weight Kg | `= π/4 × (OD²−ID²) × Length × 7.86 g/cm³` (via 0.785 factor) |
-| Material Cost | `= RM Rate × RM Weight` |
-| Sub Total | `= SUM(Material + Roughing + Turning + VMC + Special + Others + Inspection)` |
-| P&F | `= Sub Total × 3%` |
-| OH & Profit | `= Sub Total × 15%` |
-| Rejection Cost | `= Sub Total × 2%` |
-| Price/Each (INR) | `= SUM(SubTotal + P&F + OH&Profit + Rejection)` |
-| Price/Each (Currency) | `= Price_INR / Exchange_Rate` |
-| MOQ Cost | `= Price/Each × Qty/MOQ` |
-| Annual Potential | `= Price/Each × Annual Qty` |
-
-Changing **any input cell** (OD, ID, Length, Rate, Qty, Exchange Rate) automatically cascades through all dependent columns.
+1. **Dual-input AI pipeline** — same output regardless of whether the source is a 3D model or a scanned PDF, with intelligent override priority
+2. **Formula-native export** — the Excel file is not a snapshot; it is a live calculation engine that vendors can work with directly
+3. **Geometry-aware RM sizing** — RM OD, ID, and stock length are computed from the actual turned-profile envelope, not generic rules
+4. **LLM provider agnostic** — OpenAI and Gemini are interchangeable; vendor lock-in risk is eliminated
+5. **Human-in-the-loop confidence gating** — every LLM inference surface includes per-field confidence scores; low-confidence outputs are flagged before any export is committed
 
 ---
 
-## Development
+## Roadmap
 
-### Running tests (backend)
-
-```bash
-cd backend
-pytest tests/ -v
-```
-
-### Building the frontend
-
-```bash
-cd frontend
-npm run build      # output → frontend/dist/
-npm run preview    # serve the production build locally
-```
-
-### Key services
-
-| File | Purpose |
-|---|---|
-| `backend/app/services/rfq_excel_export_service.py` | Excel template fill + formula injection |
-| `backend/app/services/llm_service.py` | OpenAI / Gemini LLM integration |
-| `backend/app/services/pdf_llm_pipeline.py` | PDF → OCR → LLM → structured dims |
-| `backend/app/services/currency_service.py` | Live FX rate fetch + caching |
-| `backend/app/services/geometry_envelope_service.py` | STEP geometry → OD/ID/Length |
-| `frontend/src/components/AutoConvertResults/AutoConvertResults.tsx` | Main results + download UI |
-| `frontend/src/components/LLMAnalysis/LLMAnalysisPanel.tsx` | LLM extraction results display |
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `Port 8000 already in use` | Change `BACKEND_PORT` in `.env` or `backend/run.py` |
-| `Module not found` | Activate the virtual environment first |
-| `CORS error in browser` | Check allowed origins in `backend/app/main.py` |
-| `Port 5173 already in use` | Vite uses the next free port automatically |
-| `npm install fails` | Run `npm cache clean --force` then retry |
-| `LLM returns no dimensions` | Check `OPENAI_API_KEY` / `GOOGLE_API_KEY` in `.env` |
-| `Tesseract not found` | Install Tesseract and add it to PATH |
-| `RM Weight shows wrong value` | Ensure the Excel file is saved with `fullCalcOnLoad`; re-download |
-
----
-
-## Design Philosophy — Human-in-the-Loop CAD
-
-This system **never auto-generates STEP files without user confirmation**.  
-PDFs are ambiguous; OCR and computer vision have inherent error rates.  
-Every inference carries a confidence score; users review and approve before any CAD or cost export is committed.
-
-```
-Upload → Inference → Confidence Scoring → Human Review → Approval → Export
-```
+- [ ] Multi-part batch processing (RFQ with 50+ line items in one upload)
+- [ ] ERP / PLM webhook integration (SAP, Oracle, Odoo)
+- [ ] Supplier comparison mode (parallel quotes from multiple vendors)
+- [ ] Historical RFQ learning (fine-tune on accepted quotes to improve cost accuracy)
+- [ ] Cloud deployment (Docker + Kubernetes manifests)
 
 ---
 
 ## License
 
-[Your License Here]
-2. **Dimensions Can Be Implied or Missing**
-   - Critical dimensions may be implied through geometric relationships
-   - Standard features (fillets, chamfers) may be shown but not dimensioned
-   - Manufacturing notes may override explicit dimensions
-   - Cross-references to other drawings or standards may be required
-
-3. **Inference is Probabilistic, Not Deterministic**
-   - Computer vision and OCR have inherent error rates
-   - Confidence scores reflect uncertainty, not certainty
-   - Low-confidence inferences can produce incorrect geometry
-   - Multiple valid interpretations may exist for the same view
-
-### Our Preferred Workflow
-
-Our system follows a **human-in-the-loop** approach:
-
-```
-PDF Upload → View Detection → Inference → Confidence Scoring → Human Review → Confirmation → CAD Generation
-```
-
-**Key Principles:**
-
-1. **Inference First**: We extract dimensions and geometry from PDFs using computer vision
-2. **Confidence Scoring**: Every inference includes confidence scores (overall + per-segment)
-3. **Human Confirmation**: Users must review and approve before CAD generation
-4. **Safety Gates**: Automatic STEP generation is blocked if:
-   - Overall confidence < 0.75
-   - Any segment confidence < 0.5
-   - More than 1 segment has "thin_wall" flag
-5. **Manual Override**: Users can always switch to manual input mode
-
-### Why This Matters
-
-- **Prevents Bad CAD**: Blindly generating CAD from ambiguous PDFs creates incorrect models
-- **Builds Trust**: Users see what the system inferred and can correct errors
-- **Enables Learning**: Confidence scores help users understand system limitations
-- **Maintains Quality**: Human review catches errors before downstream processes
-
-### For Contributors
-
-When adding new features:
-
-- ✅ **DO**: Provide confidence scores for all inferences
-- ✅ **DO**: Require explicit user confirmation for CAD generation
-- ✅ **DO**: Show inference results with visualizations before export
-- ✅ **DO**: Allow users to edit/correct inferred data
-- ❌ **DON'T**: Auto-generate STEP files without user approval
-- ❌ **DON'T**: Hide confidence scores or uncertainty
-- ❌ **DON'T**: Assume PDFs contain complete, unambiguous information
-
-**Remember**: A system that sometimes produces wrong CAD is worse than a system that requires human confirmation.
-
-## Next Steps
-
-1. Implement job CRUD endpoints
-2. Add PDF upload functionality
-3. Build profile creation UI
-4. Integrate existing pipeline modules
-5. Add results display
-
-## Troubleshooting
-
-### Backend Issues
-
-- **Port 8000 already in use**: Change port in `backend/run.py`
-- **Module not found**: Ensure virtual environment is activated
-- **CORS errors**: Check CORS origins in `backend/app/main.py`
-
-### Frontend Issues
-
-- **Port 5173 already in use**: Vite will automatically use next available port
-- **npm install fails**: Try `npm cache clean --force` then reinstall
-- **TypeScript errors**: Run `npm run build` to see full error details
-
-## License
-
-[Your License Here]
+Proprietary — All rights reserved.
