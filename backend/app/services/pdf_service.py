@@ -87,29 +87,30 @@ class PDFService:
     
     def detect_views(self, job_id: str) -> List[Dict]:
         """Detect candidate view rectangles on rendered PDF pages.
-        
-        Requires OpenCV (cv2) to be installed.
-        """
-        if not _OPENCV_AVAILABLE:
-            raise ImportError("OpenCV (cv2) is required for view detection. Install with: pip install opencv-python")
-        """Detect candidate view rectangles on rendered PDF pages.
-        
-        Args:
-            job_id: Job identifier
-            
-        Returns:
-            List of detected views per page
+
+        Uses OpenCV when available.  Falls back to a single full-page synthetic
+        view per page (using PIL for dimensions) so the LLM pipeline can proceed
+        on headless servers where libGL / cv2 is unavailable.
         """
         outputs_path = self.file_storage.get_outputs_path(job_id)
         pages_dir = outputs_path / "pdf_pages"
         views_dir = outputs_path / "pdf_views"
         views_dir.mkdir(parents=True, exist_ok=True)
-        
+
         if not pages_dir.exists():
             raise FileNotFoundError(f"PDF pages not found for job {job_id}. Upload PDF first.")
-        
-        # Get all page images
+
         page_files = sorted(pages_dir.glob("page_*.png"))
+
+        # ── cv2-based detection ──────────────────────────────────────────────
+        if _OPENCV_AVAILABLE:
+            return self._detect_views_cv2(page_files, views_dir)
+
+        # ── PIL fallback: one full-page view per page ────────────────────────
+        return self._detect_views_fallback(page_files, views_dir)
+
+    def _detect_views_cv2(self, page_files, views_dir) -> List[Dict]:
+        """OpenCV-based view detection (original implementation)."""
         
         all_views = []
         
@@ -188,3 +189,52 @@ class PDFService:
         
         return all_views
 
+    def _detect_views_fallback(self, page_files, views_dir) -> List[Dict]:
+        """PIL-based fallback: one full-page synthetic view per page.
+
+        Used when cv2/libGL is unavailable (headless server).  The LLM pipeline
+        only needs a bounding box to crop from — a full-page box works fine.
+        """
+        try:
+            from PIL import Image as _PIL_Image
+        except ImportError:
+            _PIL_Image = None
+
+        all_views = []
+        for page_file in page_files:
+            page_num = int(page_file.stem.split("_")[1])
+
+            # Get image dimensions
+            if _PIL_Image is not None:
+                try:
+                    with _PIL_Image.open(str(page_file)) as im:
+                        img_width, img_height = im.size
+                except Exception:
+                    img_width, img_height = 2480, 3508  # A4 at 300 DPI fallback
+            else:
+                img_width, img_height = 2480, 3508
+
+            # One full-page view covering the entire image
+            views = [{
+                "bbox": [0.0, 0.0, 1.0, 1.0],
+                "bbox_pixels": [0, 0, img_width, img_height],
+                "area": img_width * img_height,
+                "confidence": 0.4,
+                "source": "fallback_fullpage",
+            }]
+
+            views_file = views_dir / f"page_{page_num}_views.json"
+            with open(views_file, "w") as f:
+                json.dump({
+                    "page": page_num,
+                    "views": views,
+                    "image_size": [img_width, img_height],
+                }, f, indent=2)
+
+            all_views.append({
+                "page": page_num,
+                "views": views,
+                "image_size": [img_width, img_height],
+            })
+
+        return all_views
