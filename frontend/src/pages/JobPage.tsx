@@ -67,7 +67,7 @@ function JobPage() {
               job={job}
               onSwitchMode={async (targetMode) => {
                 if (!id) return;
-                await api.setJobMode(id, targetMode);
+                await api.setJobMode(id, targetMode as 'assisted_manual' | 'auto_convert');
                 const updated = await api.getJob(id);
                 setJob(updated);
               }}

@@ -2,6 +2,7 @@
  * Global test setup for Vitest + React Testing Library.
  * Loaded before every test file via vite.config.ts → test.setupFiles.
  */
+/// <reference types="node" />
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
