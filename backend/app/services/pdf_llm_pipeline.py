@@ -1703,7 +1703,13 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
 
     # --- OCR text (always extracted; used as fallback and for context) ---
     logger.info("[Pipeline] Extracting OCR text from %s", pdf_path.name)
-    pdf_text = _extract_pdf_text(pdf_path)
+    try:
+        pdf_text = _extract_pdf_text(pdf_path)
+    except Exception as exc:
+        logger.warning(
+            "[Pipeline] Text extraction failed (%s) — proceeding in vision-only mode", exc
+        )
+        pdf_text = ""  # Vision mode will supply the context instead
 
     # --- Single merged agent: extract + validate in one LLM call ---
     logger.info(
