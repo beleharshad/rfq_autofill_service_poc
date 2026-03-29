@@ -2,11 +2,18 @@
 
 import os
 import json
-import cv2
-import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from app.storage.file_storage import FileStorage
+
+try:
+    import cv2
+    import numpy as np
+    _CV2_AVAILABLE = True
+except ImportError as _cv2_err:
+    cv2 = None  # type: ignore[assignment]
+    import numpy as np  # numpy itself is fine; only cv2 needs libGL
+    _CV2_AVAILABLE = False
 
 # Optional EasyOCR import
 try:
