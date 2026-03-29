@@ -8,8 +8,8 @@ trimesh
 PyMuPDF==1.23.8
 opencv-python==4.8.1.78
 numpy>=1.26.0
-easyocr
-matplotlib  # Optional: for debug plots (OD radius curve visualization)
+# easyocr omitted on server — pulls torch (~2 GB); pytesseract is used instead
+matplotlib  # Optional: for debug plots
 openpyxl==3.1.5
 pdfplumber==0.11.9  # PDF text extraction for engineering drawings
 PyPDF2==3.0.1  # Fallback PDF parser
