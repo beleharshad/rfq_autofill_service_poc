@@ -12,7 +12,12 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from geometry_2d import Profile2D, LineSegment, Point2D, ArcSegment
-from revolved_solid_builder import RevolvedSolidBuilder
+try:
+    from revolved_solid_builder import RevolvedSolidBuilder
+    _RSB_AVAILABLE = True
+except (ImportError, Exception):
+    RevolvedSolidBuilder = None  # type: ignore[assignment,misc]
+    _RSB_AVAILABLE = False
 from feature_extractor import FeatureExtractor, TurnedPartStack
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService

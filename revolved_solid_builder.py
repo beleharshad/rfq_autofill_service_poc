@@ -5,15 +5,28 @@ This module converts validated Profile2D objects into PythonOCC B-Rep solids
 using revolve-based construction for axisymmetric geometry.
 """
 
-from typing import Optional, Tuple
-from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Ax1, gp_Ax2, gp_Circ
-from OCC.Core.GC import GC_MakeArcOfCircle, GC_MakeSegment
-from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Wire, TopoDS_Face
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
-from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeRevol
-from OCC.Core.BRepCheck import BRepCheck_Analyzer
+from __future__ import annotations  # Defer all annotations so OCC type hints don't raise NameError when OCC is absent
+
+from typing import Optional, Tuple, Any
 import math
+
+try:
+    from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Ax1, gp_Ax2, gp_Circ
+    from OCC.Core.GC import GC_MakeArcOfCircle, GC_MakeSegment
+    from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Wire, TopoDS_Face
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeRevol
+    from OCC.Core.BRepCheck import BRepCheck_Analyzer
+    OCC_AVAILABLE = True
+except ImportError:
+    OCC_AVAILABLE = False
+    # Stub names so that method bodies referencing them only fail at call-time, not at import
+    gp_Pnt = gp_Dir = gp_Ax1 = gp_Ax2 = gp_Circ = None  # type: ignore[assignment]
+    GC_MakeArcOfCircle = GC_MakeSegment = None  # type: ignore[assignment]
+    TopoDS_Solid = TopoDS_Wire = TopoDS_Face = None  # type: ignore[assignment]
+    BRepBuilderAPI_MakeWire = BRepBuilderAPI_MakeFace = BRepBuilderAPI_MakeEdge = None  # type: ignore[assignment]
+    BRepPrimAPI_MakeRevol = BRepCheck_Analyzer = None  # type: ignore[assignment]
 import sys
 from pathlib import Path
 
