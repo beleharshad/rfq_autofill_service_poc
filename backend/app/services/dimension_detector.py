@@ -1,13 +1,19 @@
 """Service for detecting dimension annotations in engineering drawings."""
 
+from __future__ import annotations  # defer np.ndarray annotation evaluation
+
 import re
 try:
     import cv2
+    import numpy as np
     _CV2_AVAILABLE = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
     _CV2_AVAILABLE = False
-import numpy as np
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 from typing import List, Dict, Tuple, Optional
 import logging
 

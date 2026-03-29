@@ -1,14 +1,20 @@
 """CV-based Feature Detection Service - Uses modular CV detector."""
 
+from __future__ import annotations  # defer np.ndarray annotation evaluation
+
 import os
 import json
 try:
     import cv2
+    import numpy as np
     _CV2_AVAILABLE = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
     _CV2_AVAILABLE = False
-import numpy as np
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone

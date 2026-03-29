@@ -1,5 +1,7 @@
 """Feature Detection Service - Orchestrates feature detection using the modular system."""
 
+from __future__ import annotations  # defer np.ndarray annotation evaluation
+
 import json
 import math
 import os
@@ -9,11 +11,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 try:
     import cv2
+    import numpy as np
     _CV2_AVAILABLE = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
     _CV2_AVAILABLE = False
-import numpy as np
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 import pdfplumber
 from app.storage.file_storage import FileStorage
 

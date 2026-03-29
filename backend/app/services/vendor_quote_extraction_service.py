@@ -18,13 +18,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 try:
+    import numpy as np
     import cv2
     _CV2_AVAILABLE = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
     _CV2_AVAILABLE = False
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 
 from app.storage.file_storage import FileStorage
 

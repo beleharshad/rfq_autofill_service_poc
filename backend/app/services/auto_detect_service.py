@@ -1,5 +1,7 @@
 """Auto-detect turned part views from PDF images."""
 
+from __future__ import annotations  # defer np.ndarray annotation evaluation
+
 import os
 import json
 from pathlib import Path
@@ -10,10 +12,13 @@ try:
     import cv2
     import numpy as np
     _CV2_AVAILABLE = True
-except ImportError as _cv2_err:
+except ImportError:
     cv2 = None  # type: ignore[assignment]
-    import numpy as np  # numpy itself is fine; only cv2 needs libGL
     _CV2_AVAILABLE = False
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 
 # Optional EasyOCR import
 try:

@@ -1,14 +1,20 @@
 """Service for inferring TurnedPartStack from detected turned view."""
 
+from __future__ import annotations  # defer np.ndarray/cv2 annotation evaluation
+
 import json
 import re
 try:
     import cv2
+    import numpy as np
     _CV2_AVAILABLE = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
     _CV2_AVAILABLE = False
-import numpy as np
+    try:
+        import numpy as np
+    except Exception:
+        np = None  # type: ignore[assignment]
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timezone
