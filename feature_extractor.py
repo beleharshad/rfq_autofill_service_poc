@@ -5,23 +5,37 @@ This module performs read-only analysis of TopoDS_Solid to extract
 manufacturing-relevant features using deterministic geometric and topological rules.
 """
 
-from typing import List, Optional, Dict, Set, Tuple
+from typing import List, Optional, Dict, Set, Tuple, Any
 from enum import Enum
 from dataclasses import dataclass, field
-from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Shell, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex
-from OCC.Core.TopExp import TopExp_Explorer
-from OCC.Core.TopAbs import TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_IN, TopAbs_OUT, TopAbs_ON
-from OCC.Core.BRep import BRep_Tool
-from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
-from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere
-from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Ax1, gp_Pln, gp_Vec
-from OCC.Core.Geom import Geom_Plane, Geom_CylindricalSurface, Geom_ConicalSurface
-from OCC.Core.TopTools import TopTools_ListOfShape
-from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
-from OCC.Core.GeomLProp import GeomLProp_SLProps
-# Note: TopExp_MapShapesAndAncestors not available in this PythonOCC version
-# from OCC.Core.TopExp import TopExp_MapShapesAndAncestors
 import math
+
+# OCC (pythonocc-core) is only available on developer machines with conda.
+# On the server we run without it — only TurnedPartStack/TurnedPartSegment
+# (pure-Python dataclasses below) are needed by the REST API.
+try:
+    from OCC.Core.TopoDS import TopoDS_Solid, TopoDS_Shell, TopoDS_Face, TopoDS_Edge, TopoDS_Vertex
+    from OCC.Core.TopExp import TopExp_Explorer
+    from OCC.Core.TopAbs import TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX, TopAbs_IN, TopAbs_OUT, TopAbs_ON
+    from OCC.Core.BRep import BRep_Tool
+    from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+    from OCC.Core.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere
+    from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Ax1, gp_Pln, gp_Vec
+    from OCC.Core.Geom import Geom_Plane, Geom_CylindricalSurface, Geom_ConicalSurface
+    from OCC.Core.TopTools import TopTools_ListOfShape
+    from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCC.Core.GeomLProp import GeomLProp_SLProps
+    # Note: TopExp_MapShapesAndAncestors not available in this PythonOCC version
+    # from OCC.Core.TopExp import TopExp_MapShapesAndAncestors
+    OCC_AVAILABLE = True
+except ImportError:
+    OCC_AVAILABLE = False
+    # Stub types so that type annotations in OCC-dependent methods don't crash at import time
+    TopoDS_Solid = Any  # type: ignore[assignment,misc]
+    TopoDS_Shell = Any  # type: ignore[assignment,misc]
+    TopoDS_Face = Any  # type: ignore[assignment,misc]
+    TopoDS_Edge = Any  # type: ignore[assignment,misc]
+    TopoDS_Vertex = Any  # type: ignore[assignment,misc]
 import json
 import sys
 from pathlib import Path

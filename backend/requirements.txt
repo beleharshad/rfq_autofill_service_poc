@@ -8,7 +8,8 @@ trimesh
 PyMuPDF==1.23.8
 opencv-python-headless==4.8.1.78
 numpy>=1.26.0
-pythonocc-core
+# pythonocc-core — NOT on PyPI for Python 3.12; install via conda on dev machines.
+# The server guards OCC imports in feature_extractor.py so the backend starts without it.
 # easyocr omitted on server — pulls torch (~2 GB); pytesseract is used instead
 matplotlib  # Optional: for debug plots
 openpyxl==3.1.5
