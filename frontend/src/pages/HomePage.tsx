@@ -4,9 +4,9 @@ import './HomePage.css'
 function HomePage() {
   return (
     <div className="home-page">
-      <h1>RFQ 3D View</h1>
+      <h1>Mechmind</h1>
       <p className="home-description">
-        Upload engineering drawings and create revolve profiles to extract manufacturing metrics.
+        AI-powered RFQ autofill — upload an engineering drawing and get instant manufacturing metrics.
       </p>
       <Link to="/jobs/new" className="new-job-button">
         New Job
