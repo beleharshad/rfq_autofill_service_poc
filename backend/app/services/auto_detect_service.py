@@ -474,6 +474,10 @@ class AutoDetectService:
         if not views_dir.exists():
             raise FileNotFoundError(f"Detected views not found for job {job_id}. Run detect_views first.")
         
+        # --- cv2-unavailable fallback: pick largest view from JSON without image analysis ---
+        if not _CV2_AVAILABLE:
+            return self._auto_detect_fallback_no_cv2(job_id, outputs_path, views_dir)
+        
         # Load all page images and views
         page_files = sorted(pages_dir.glob("page_*.png"))
         all_ranked_views = []
@@ -592,3 +596,63 @@ class AutoDetectService:
             "total_views_analyzed": len(all_ranked_views)
         }
 
+    def _auto_detect_fallback_no_cv2(self, job_id: str, outputs_path, views_dir) -> Dict:
+        """Fallback auto-detect when cv2/libGL is unavailable.
+
+        Reads the already-detected view JSON files and picks the largest view
+        (by pixel area) as the best candidate.  Scores are all set to a fixed
+        value of 0.75 so downstream LLM analysis is still triggered.
+        """
+        all_ranked_views = []
+        views_files = sorted(views_dir.glob("page_*_views.json"))
+
+        for views_file in views_files:
+            try:
+                page_num = int(views_file.stem.split("_")[1])
+                with open(views_file, "r") as f:
+                    page_views_data = json.load(f)
+                views = page_views_data.get("views", [])
+                for view_idx, view in enumerate(views):
+                    bbox_pixels = view.get("bbox_pixels", [])
+                    if len(bbox_pixels) != 4:
+                        continue
+                    x, y, w, h = bbox_pixels
+                    area = w * h
+                    ranked_view = {
+                        "page": page_num,
+                        "view_index": view_idx,
+                        "bbox": view.get("bbox"),
+                        "bbox_pixels": bbox_pixels,
+                        "scores": {
+                            "axis_conf": 0.75,
+                            "sym_conf": 0.75,
+                            "profile_score": 0.75,
+                            "dia_text_conf": 0.0,
+                            "section_conf": 0.0,
+                            "view_conf": 0.75,
+                        },
+                        "axis_info": None,
+                        "area": area,
+                        "debug_artifacts": {},
+                        "source": "fallback_no_cv2",
+                    }
+                    all_ranked_views.append(ranked_view)
+            except Exception as exc:
+                print(f"[AutoDetect fallback] Skipping {views_file}: {exc}")
+                continue
+
+        # Pick largest view as the best candidate
+        all_ranked_views.sort(key=lambda v: v.get("area", 0), reverse=True)
+        best_view = all_ranked_views[0] if all_ranked_views else None
+
+        results_file = outputs_path / "auto_detect_results.json"
+        result = {
+            "job_id": job_id,
+            "ranked_views": all_ranked_views,
+            "best_view": best_view,
+            "confidence_threshold": self.confidence_threshold,
+            "total_views_analyzed": len(all_ranked_views),
+        }
+        with open(results_file, "w") as f:
+            json.dump(result, f, indent=2)
+        return result
