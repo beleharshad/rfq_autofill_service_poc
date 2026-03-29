@@ -24,7 +24,7 @@ async def create_job(
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     mode: Optional[str] = Form(None),
-    files: Optional[List[UploadFile]] = File(None),
+    files: List[UploadFile] = File(default=[]),
 ):
     """Create a new job and upload files.
 
