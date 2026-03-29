@@ -6,8 +6,9 @@ pytest==7.4.3
 httpx==0.25.2
 trimesh
 PyMuPDF==1.23.8
-opencv-python==4.8.1.78
+opencv-python-headless==4.8.1.78
 numpy>=1.26.0
+pythonocc-core
 # easyocr omitted on server — pulls torch (~2 GB); pytesseract is used instead
 matplotlib  # Optional: for debug plots
 openpyxl==3.1.5
