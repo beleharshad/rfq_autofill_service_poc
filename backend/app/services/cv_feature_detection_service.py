@@ -2,8 +2,13 @@
 
 import os
 import json
-import cv2
-import numpy as np  # Essential import
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone

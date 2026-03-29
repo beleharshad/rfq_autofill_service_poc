@@ -2,7 +2,12 @@
 
 import json
 import re
-import cv2
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional

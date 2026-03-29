@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import cv2
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
 
 from app.storage.file_storage import FileStorage
 

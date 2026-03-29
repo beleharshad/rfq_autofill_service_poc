@@ -1,7 +1,12 @@
 """Service for detecting dimension annotations in engineering drawings."""
 
 import re
-import cv2
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 import logging

@@ -7,8 +7,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-import cv2
-import numpy as np  # <--- ADD THIS LINE
+try:
+    import cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
+import numpy as np
 import pdfplumber
 from app.storage.file_storage import FileStorage
 
