@@ -1407,6 +1407,8 @@ class StackInferenceService:
             "explanation": explanation,
             "scale_report": scale_report,  # Include scale calibration info
             "outputs": ["inferred_stack.json", "part_summary.json", "scale_report.json"]
+        }
+
     def _infer_stack_fallback_no_cv2(
         self,
         job_id: str,
