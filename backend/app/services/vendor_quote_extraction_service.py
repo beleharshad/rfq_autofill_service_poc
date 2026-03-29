@@ -58,6 +58,18 @@ def _mm_to_in(mm: float) -> float:
 EXTRACTOR_VERSION = "v2026-01-13-odlen-v2"
 
 
+def _pil_imread_bgr(path: str):
+    """Load image as BGR numpy array using PIL (cv2 fallback when libGL unavailable)."""
+    try:
+        import numpy as _np
+        from PIL import Image as _PILImage
+        img = _PILImage.open(str(path)).convert("RGB")
+        arr = _np.array(img, dtype=_np.uint8)
+        return arr[:, :, ::-1].copy()  # RGB → BGR
+    except Exception:
+        return None
+
+
 class VendorQuoteExtractionService:
     def __init__(self) -> None:
         self.fs = FileStorage()
@@ -69,7 +81,7 @@ class VendorQuoteExtractionService:
         """
         import pytesseract  # type: ignore
 
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB) if _CV2_AVAILABLE else image_bgr[:, :, ::-1]
         # PSM 6: assume a block of text; good for engineering drawings.
         config = "--psm 6"
         data = pytesseract.image_to_data(rgb, output_type=pytesseract.Output.DICT, config=config)
@@ -165,6 +177,8 @@ class VendorQuoteExtractionService:
         len_region = crop_frac(crop_bgr, 0.12, 0.06, 0.98, 0.80)
 
         def preprocess(img_bgr: np.ndarray) -> np.ndarray:
+            if not _CV2_AVAILABLE:
+                return img_bgr  # cv2 unavailable: skip preprocessing, pass raw pixels
             # Upscale aggressively; engineering drawing dims are tiny at 300 DPI renders.
             try:
                 img_bgr = cv2.resize(img_bgr, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
@@ -479,7 +493,7 @@ class VendorQuoteExtractionService:
         if not page_img_path.exists():
             return None, debug
 
-        img = cv2.imread(str(page_img_path))
+        img = cv2.imread(str(page_img_path)) if _CV2_AVAILABLE else _pil_imread_bgr(str(page_img_path))
         if img is None:
             return None, debug
 
@@ -527,7 +541,7 @@ class VendorQuoteExtractionService:
         if not page_img_path.exists():
             return None, debug
 
-        img = cv2.imread(str(page_img_path))
+        img = cv2.imread(str(page_img_path)) if _CV2_AVAILABLE else _pil_imread_bgr(str(page_img_path))
         if img is None:
             return None, debug
 
@@ -548,7 +562,7 @@ class VendorQuoteExtractionService:
         debug: Dict[str, Any] = {"used_full_page": False, "page_image": None}
         if not page_img_path.exists():
             return None, debug
-        img = cv2.imread(str(page_img_path))
+        img = cv2.imread(str(page_img_path)) if _CV2_AVAILABLE else _pil_imread_bgr(str(page_img_path))
         if img is None:
             return None, debug
         debug["used_full_page"] = True
@@ -562,7 +576,7 @@ class VendorQuoteExtractionService:
         debug: Dict[str, Any] = {"used_notes_crop": False, "page_image": None}
         if not page_img_path.exists():
             return None, debug
-        img = cv2.imread(str(page_img_path))
+        img = cv2.imread(str(page_img_path)) if _CV2_AVAILABLE else _pil_imread_bgr(str(page_img_path))
         if img is None:
             return None, debug
         h, w = img.shape[:2]
@@ -581,7 +595,7 @@ class VendorQuoteExtractionService:
         Tries EasyOCR first; falls back to pytesseract if EasyOCR/torch is unavailable.
         """
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB) if _CV2_AVAILABLE else image_bgr[:, :, ::-1]
 
         # 1) EasyOCR path
         try:
