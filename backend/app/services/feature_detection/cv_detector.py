@@ -1,5 +1,7 @@
 """CV-based feature detection using computer vision."""
 
+from __future__ import annotations  # Defer annotation evaluation so np.ndarray doesn't crash when numpy/cv2 unavailable
+
 import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
