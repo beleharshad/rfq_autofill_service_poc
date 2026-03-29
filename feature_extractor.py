@@ -5,6 +5,8 @@ This module performs read-only analysis of TopoDS_Solid to extract
 manufacturing-relevant features using deterministic geometric and topological rules.
 """
 
+from __future__ import annotations  # Makes all annotations lazy — OCC types in dataclass fields won't raise NameError when OCC is absent
+
 from typing import List, Optional, Dict, Set, Tuple, Any
 from enum import Enum
 from dataclasses import dataclass, field
