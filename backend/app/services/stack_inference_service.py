@@ -804,6 +804,10 @@ class StackInferenceService:
         if not page_file.exists():
             raise FileNotFoundError(f"Page image not found: {page_file}")
         
+        # --- cv2 unavailable: use PIL-based fallback that produces placeholder geometry ---
+        if not _CV2_AVAILABLE:
+            return self._infer_stack_fallback_no_cv2(job_id, best_view, outputs_path, debug_dir, mode)
+
         page_img = cv2.imread(str(page_file))
         if page_img is None:
             raise ValueError(f"Failed to load page image: {page_file}")
@@ -1403,8 +1407,171 @@ class StackInferenceService:
             "explanation": explanation,
             "scale_report": scale_report,  # Include scale calibration info
             "outputs": ["inferred_stack.json", "part_summary.json", "scale_report.json"]
+    def _infer_stack_fallback_no_cv2(
+        self,
+        job_id: str,
+        best_view: Dict,
+        outputs_path: Path,
+        debug_dir: Path,
+        mode: str,
+    ) -> Dict:
+        """Fallback for infer_stack_from_view when cv2/libGL is unavailable.
+
+        Uses PIL to crop the view and produces rough placeholder geometry based
+        on pixel dimensions at 300 DPI.  The downstream LLM analysis step reads
+        the image directly and will produce accurate human-readable dimensions.
+        """
+        RENDER_DPI = 300
+        pixel_to_inch = 1.0 / RENDER_DPI
+        bbox_pixels = best_view.get("bbox_pixels", [])  # [x, y, w, h]
+        page_num = best_view["page"]
+        pages_dir = outputs_path / "pdf_pages"
+        page_file = pages_dir / f"page_{page_num}.png"
+
+        # --- Crop with PIL -------------------------------------------------------
+        crop_w_px, crop_h_px = 200, 500  # safe fallback if image is unreadable
+        try:
+            from PIL import Image as _PILImage
+            pil_page = _PILImage.open(str(page_file))
+            if len(bbox_pixels) == 4:
+                x, y, w, h = bbox_pixels
+                pil_crop = pil_page.crop((x, y, x + w, y + h))
+                crop_w_px, crop_h_px = pil_crop.size  # PIL: (width, height)
+                crop_path = debug_dir / "normalized.png"
+                pil_crop.save(str(crop_path))
+                logger.info(
+                    f"[FallbackInfer] Saved PIL crop {crop_w_px}x{crop_h_px} → {crop_path}"
+                )
+        except Exception as exc:
+            logger.warning(f"[FallbackInfer] PIL crop failed: {exc}; using fallback dimensions")
+
+        # --- Rough geometry at 300 DPI -------------------------------------------
+        total_length_in = round(crop_h_px * pixel_to_inch, 4)
+        od_diameter_in = round(crop_w_px * pixel_to_inch, 4)
+
+        scale_report: Dict = {
+            "method": "dpi_based",
+            "confidence": 0.50,
+            "render_dpi": RENDER_DPI,
+            "detected_drawing_scale": 1.0,
+            "inch_per_pixel": pixel_to_inch,
+            "notes": "cv2 unavailable; placeholder geometry only — LLM will refine",
+            "validation_passed": True,
+            "derived_total_length_inches": total_length_in,
+            "derived_max_od_inches": od_diameter_in,
         }
-    
+
+        placeholder_segment = {
+            "z_start": 0.0,
+            "z_end": total_length_in,
+            "od_diameter": od_diameter_in,
+            "id_diameter": 0.0,
+            "confidence": 0.40,
+            "flags": ["fallback_no_cv2", "placeholder"],
+        }
+
+        totals = {
+            "volume_in3": 0.0,
+            "od_area_in2": 0.0,
+            "id_area_in2": 0.0,
+            "total_length_in": total_length_in,
+            "end_face_area_start_in2": 0.0,
+            "end_face_area_end_in2": 0.0,
+            "od_shoulder_area_in2": 0.0,
+            "id_shoulder_area_in2": 0.0,
+            "planar_ring_area_in2": 0.0,
+            "total_surface_area_in2": 0.0,
+        }
+
+        now_utc = datetime.now(timezone.utc).isoformat()
+
+        inferred_stack_data = {
+            "job_id": job_id,
+            "source_view": {
+                "page": page_num,
+                "view_index": best_view.get("view_index", 0),
+                "view_conf": (best_view.get("scores") or {}).get("view_conf", 0.0),
+            },
+            "segments": [placeholder_segment],
+            "overall_confidence": 0.40,
+            "warnings": [
+                "cv2 unavailable; geometry is a rough placeholder from pixel dimensions"
+            ],
+            "scale_report": scale_report,
+            "inferred_at_utc": now_utc,
+        }
+
+        inferred_stack_file = outputs_path / "inferred_stack.json"
+        with open(inferred_stack_file, "w") as f:
+            json.dump(inferred_stack_data, f, indent=2)
+
+        part_summary = PartSummary(
+            schema_version="0.1",
+            generated_at_utc=now_utc,
+            units={"length": "in", "area": "in^2", "volume": "in^3"},
+            scale_report={
+                "method": "dpi_based",
+                "confidence": 0.50,
+                "notes": "cv2 unavailable; placeholder geometry",
+            },
+            z_range=[0.0, total_length_in],
+            segments=[
+                {
+                    "z_start": 0.0,
+                    "z_end": total_length_in,
+                    "od_diameter": od_diameter_in,
+                    "id_diameter": 0.0,
+                    "wall_thickness": round(od_diameter_in / 2.0, 4),
+                    "volume_in3": 0.0,
+                    "od_area_in2": 0.0,
+                    "id_area_in2": 0.0,
+                    "confidence": 0.40,
+                    "flags": ["fallback_no_cv2", "placeholder"],
+                }
+            ],
+            totals={
+                "total_volume_in3": 0.0,
+                "total_od_area_in2": 0.0,
+                "total_id_area_in2": 0.0,
+                "total_length_in": total_length_in,
+            },
+            inference_metadata={
+                "mode": mode,
+                "overall_confidence": 0.40,
+                "source": "fallback_no_cv2",
+            },
+            features=None,
+        )
+
+        summary_file = outputs_path / "part_summary.json"
+        with open(summary_file, "w") as f:
+            json.dump(part_summary.to_dict(), f, indent=2)
+
+        scale_report_file = debug_dir / "scale_report.json"
+        with open(scale_report_file, "w") as f:
+            json.dump(scale_report, f, indent=2)
+
+        self.job_service.job_storage.update_job_status(job_id, JobStatus.COMPLETED)
+        logger.info(f"[FallbackInfer] Placeholder stack written for job {job_id}")
+
+        return {
+            "job_id": job_id,
+            "status": "DONE",
+            "segments": [placeholder_segment],
+            "totals": totals,
+            "overall_confidence": 0.40,
+            "segment_confidences": [0.40],
+            "warnings": [
+                "cv2 unavailable; geometry is a placeholder — LLM analysis will provide accurate dimensions"
+            ],
+            "explanation": (
+                "Placeholder geometry (cv2 unavailable on server). "
+                "The LLM analysis step reads the drawing image directly and extracts accurate dimensions."
+            ),
+            "scale_report": scale_report,
+            "outputs": ["inferred_stack.json", "part_summary.json", "scale_report.json"],
+        }
+
     # Standard drawing scales used by _estimate_drawing_scale
     STANDARD_SCALES = [0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 2.5, 4.0, 5.0, 10.0]
 
