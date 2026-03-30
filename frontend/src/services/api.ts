@@ -14,9 +14,10 @@ import {
   RFQEnvelopeRequest,
   RunReport,
   LLMAnalysisResult,
+  CorrectionsMap,
 } from './types';
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -834,6 +835,33 @@ export const api = {
       `${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/llm-analysis/export-excel`
     );
     return handleBlobResponse(response);
+  },
+
+  /**
+   * Persist a single user-corrected dimension for a job.
+   * Corrections are stored server-side as outputs/corrections.json.
+   */
+  async saveCorrection(
+    jobId: string,
+    field: string,
+    value: number | string,
+    originalValue: number | string | null,
+  ): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/corrections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field, value, original_value: originalValue }),
+    });
+    await handleResponse<unknown>(response);
+  },
+
+  /**
+   * Return the persisted dimension corrections map for a job.
+   * Returns an empty object when no corrections have been saved yet.
+   */
+  async getCorrections(jobId: string): Promise<CorrectionsMap> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/corrections`);
+    return handleResponse<CorrectionsMap>(response);
   },
 
   // ── 3D Preview (OCC B-Rep → STEP → GLB) ─────────────────────────────────

@@ -4,7 +4,7 @@ import './HomePage.css'
 function HomePage() {
   return (
     <div className="home-page">
-      <h1>Mechmind</h1>
+      <h1>QuoteMyCAD</h1>
       <p className="home-description">
         AI-powered RFQ autofill — upload an engineering drawing and get instant manufacturing metrics.
       </p>

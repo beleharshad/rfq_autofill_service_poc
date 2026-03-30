@@ -10,7 +10,7 @@ function App() {
       <div className="app">
         <header className="app-header">
           <Link to="/" className="app-title">
-            Mechmind
+            QuoteMyCAD
           </Link>
         </header>
         <main className="app-main">

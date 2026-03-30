@@ -1,7 +1,7 @@
 // AutoConvertResults.tsx — clean single-panel UI with in-browser 3D preview
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { FileInfo, RFQAutofillRequest } from '../../services/types';
+import type { FileInfo, RFQAutofillRequest, CorrectionsMap } from '../../services/types';
 import LatheViewer from './LatheViewer';
 import { setSegments, type Segment as SegmentStoreType } from '../../state/segmentStore';
 import './AutoConvertResults.css';
@@ -95,6 +95,10 @@ function AutoConvertResults({
   const [idOvr,    setIdOvr]    = useState<number | null>(null);
   const [lenOvr,   setLenOvr]   = useState<number | null>(null);
 
+  // Track whether server-side corrections have been loaded into the override states
+  // so we don't immediately re-save them on first render.
+  const correctionsLoadedRef = useRef(false);
+
   // Generate state
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus]   = useState<string | null>(null);
@@ -132,12 +136,45 @@ function AutoConvertResults({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
+  // Load persisted corrections on mount and pre-populate dim overrides.
+  useEffect(() => {
+    correctionsLoadedRef.current = false;
+    api.getCorrections(jobId)
+      .then((corrs: CorrectionsMap) => {
+        if (corrs['od_in']?.value != null)     setOdOvr(Number(corrs['od_in'].value));
+        if (corrs['max_od_in']?.value != null) setMaxOdOvr(Number(corrs['max_od_in'].value));
+        if (corrs['id_in']?.value != null)     setIdOvr(Number(corrs['id_in'].value));
+        if (corrs['length_in']?.value != null) setLenOvr(Number(corrs['length_in'].value));
+      })
+      .catch(() => { /* no corrections saved yet — ignore */ })
+      .finally(() => { correctionsLoadedRef.current = true; });
+  }, [jobId]);
+
+  // Persist override changes to the server.
+  // Fires after every user-driven change; the correctionsLoadedRef guard prevents
+  // saving during the initial hydration from the server.
+  useEffect(() => {
+    if (!correctionsLoadedRef.current) return;
+    const llmExt = (llmAnalysis as any)?.extracted ?? {};
+    const pairs: [string, number | null, number | null][] = [
+      ['od_in',      odOvr,    llmExt.od_in     ?? null],
+      ['max_od_in',  maxOdOvr, llmExt.max_od_in ?? null],
+      ['id_in',      idOvr,    llmExt.id_in     ?? null],
+      ['length_in',  lenOvr,   llmExt.length_in ?? null],
+    ];
+    for (const [field, value, original] of pairs) {
+      // Save the value (even null — null tells the server the override was cleared).
+      api.saveCorrection(jobId, field, value as any, original).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [odOvr, maxOdOvr, idOvr, lenOvr]);
+
   // Subscribe to the /llm-stream SSE endpoint while the background LLM thread is running.
   // The backend pushes exactly ONE message (the full llm_analysis.json) when done.
   // Zero polling — no repeated requests.
   useEffect(() => {
     if (!llmAnalysis?.pending) return;
-    const es = new EventSource(`/api/v1/jobs/${jobId}/llm-stream`);
+    const es = new EventSource(`${import.meta.env.VITE_API_URL ?? ''}/api/v1/jobs/${jobId}/llm-stream`);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -359,15 +396,16 @@ function AutoConvertResults({
     normalizePartNo(rfqPartNo.trim() || llmAnalysis?.extracted?.part_number || jobId.slice(0, 8));
 
   const buildPayload = (partNo: string): RFQAutofillRequest => {
-    // Build dimension overrides from LLM analysis if available — these are
-    // more accurate than the geometry-computed values the autofill service produces.
+    // Merge user dim overrides (odOvr etc.) with raw LLM extracted values.
+    // Priority: user override → LLM extracted → 0 (handled by effectiveDims).
+    const dims = effectiveDims(llmAnalysis, { od: odOvr, maxOd: maxOdOvr, id: idOvr, len: lenOvr });
     const llmExt = llmAnalysis?.extracted;
-    const dimensionOverrides: Record<string, number> | undefined = llmExt
+    const dimensionOverrides: Record<string, number> | undefined = (llmExt || odOvr != null || idOvr != null || lenOvr != null)
       ? Object.fromEntries(
           [
-            ['finish_od_in', llmExt.od_in ?? llmExt.max_od_in],
-            ['finish_id_in', llmExt.id_in],
-            ['finish_len_in', llmExt.length_in],
+            ['finish_od_in',  dims.od_in     > 0.001 ? dims.od_in     : null],
+            ['finish_id_in',  dims.id_in     > 0     ? dims.id_in     : null],
+            ['finish_len_in', dims.length_in > 0.001 ? dims.length_in : null],
           ].filter(([, v]) => v != null) as [string, number][]
         )
       : undefined;
