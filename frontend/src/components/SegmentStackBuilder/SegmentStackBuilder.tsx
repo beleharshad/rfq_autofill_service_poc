@@ -442,22 +442,22 @@ function SegmentStackBuilder({ jobId, onSuccess }: SegmentStackBuilderProps) {
                 <p>✓ STEP file generated successfully!</p>
                 <div className="step-downloads">
                   {stepResult.outputs.includes('model.step') && (
-                    <a
-                      href={api.getPdfUrl(jobId, 'outputs/model.step')}
-                      download
+                    <button
+                      type="button"
                       className="download-link"
+                      onClick={() => api.downloadFile(jobId, 'outputs/model.step', 'model.step')}
                     >
                       Download STEP
-                    </a>
+                    </button>
                   )}
                   {stepResult.outputs.includes('model.glb') && (
-                    <a
-                      href={api.getPdfUrl(jobId, 'outputs/model.glb')}
-                      download
+                    <button
+                      type="button"
                       className="download-link"
+                      onClick={() => api.downloadFile(jobId, 'outputs/model.glb', 'model.glb')}
                     >
                       Download GLB
-                    </a>
+                    </button>
                   )}
                 </div>
               </div>

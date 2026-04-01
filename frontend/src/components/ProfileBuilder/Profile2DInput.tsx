@@ -162,8 +162,7 @@ function Profile2DInput({ jobId }: Profile2DInputProps) {
   };
 
   const handleDownloadStep = () => {
-    const url = api.getPdfUrl(jobId, 'outputs/model.step');
-    window.open(url, '_blank');
+    api.downloadFile(jobId, 'outputs/model.step', 'model.step');
   };
 
   return (

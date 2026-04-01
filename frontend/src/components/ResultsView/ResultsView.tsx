@@ -269,13 +269,13 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
       <div className="downloads-section">
         <h3>Downloads</h3>
         <div className="download-links">
-          <a
-            href={api.getPdfUrl(jobId, 'outputs/part_summary.json')}
+          <button
+            type="button"
             className="download-link"
-            download
+            onClick={() => api.downloadFile(jobId, 'outputs/part_summary.json', 'part_summary.json')}
           >
             Download part_summary.json
-          </a>
+          </button>
 
           {(hasStepFile && stepDownloadUrl) || stepFromStackStatus === 'OK' ? (
             <button

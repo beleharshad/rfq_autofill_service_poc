@@ -236,7 +236,12 @@ function AutoConvertResults({
       // Determine PDF page url (first page image — pages are 0-indexed: page_0.png, page_1.png …)
       if (!propPdfPageUrl) {
         const pageImg = files.files.find((f) => /outputs\/pdf_pages\/page_\d+\.(png|jpg|jpeg)$/i.test(f.path));
-        if (pageImg) setPdfPageUrl(api.getPdfUrl(jobId, pageImg.path));
+        if (pageImg) {
+          try {
+            const blobUrl = await api.fetchBlobUrl(jobId, pageImg.path);
+            setPdfPageUrl(blobUrl);
+          } catch { /* drawing preview unavailable */ }
+        }
       }
 
       // Prefill Part No from job name or PDF filename

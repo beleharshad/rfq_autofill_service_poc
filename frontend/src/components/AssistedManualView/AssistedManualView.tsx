@@ -220,8 +220,11 @@ function PageThumbnail({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = api.getPdfUrl(jobId, imagePath);
-    setImageUrl(url);
+    let blobUrl: string | null = null;
+    api.fetchBlobUrl(jobId, imagePath)
+      .then((url) => { blobUrl = url; setImageUrl(url); })
+      .catch(() => { /* image unavailable */ });
+    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
   }, [jobId, imagePath]);
 
   const handleViewRectClick = (e: React.MouseEvent, viewIndex: number) => {

@@ -1067,7 +1067,10 @@ function ThreeJSViewer({
         const glbFile = files.files.find((f) => f.name === 'model.glb');
         if (glbFile) {
           setHasGlb(true);
-          setGlbUrl(api.getPdfUrl(jobId, 'outputs/model.glb'));
+          try {
+            const blobUrl = await api.fetchBlobUrl(jobId, 'outputs/model.glb');
+            setGlbUrl(blobUrl);
+          } catch { /* glb unavailable */ }
         }
       } catch (err) {
         // Ignore errors - will fall back to procedural

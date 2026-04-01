@@ -155,13 +155,26 @@ export const api = {
   },
 
   /**
-   * Get PDF file URL for viewing.
-   * Appends api_key as a query param so direct browser requests
-   * (<img src>, <a href>, window.open) are authenticated without headers.
+   * Returns the download URL for a job file.
+   * Used only for programmatic fetch() calls (which inject X-API-Key via the
+   * module-level fetch shadow). Never put this URL in <img src> or <a href> —
+   * use fetchBlobUrl() instead so the key stays in the header.
    */
   getPdfUrl(jobId: string, filePath: string): string {
-    const base = `${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`;
-    return _INTERNAL_API_KEY ? `${base}&api_key=${encodeURIComponent(_INTERNAL_API_KEY)}` : base;
+    return `${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`;
+  },
+
+  /**
+   * Fetches a job file with the X-API-Key header and returns a blob object URL.
+   * Use this for <img src>, Three.js loaders, or any place that needs a URL
+   * the browser can load directly — the key never appears in the URL.
+   * Caller is responsible for calling URL.revokeObjectURL() when done.
+   */
+  async fetchBlobUrl(jobId: string, filePath: string): Promise<string> {
+    const response = await _fetch(`${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`);
+    if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
   },
 
   /**
