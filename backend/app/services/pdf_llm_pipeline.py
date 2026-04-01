@@ -182,9 +182,19 @@ length_in  (Finish Length / OAL):
   1. Look for a single dimension line that spans the FULL axial extent of the part profile
      (from leftmost witness line to rightmost witness line). That value = length_in.
      Labels: OAL, OVERALL, TOTAL LENGTH, or no label at all.
+     STOP HERE: if you find this full-span dimension, do NOT add any other partial dims to it.
+     A partial step dimension that starts at the same end-face is INSIDE this OAL, not beyond it.
   2. No full-span line? SUM all sequential axial partial dimensions that together cover the
      full axial extent from one end-face to the other. Their sum = length_in.
      (Confidence 0.80 when using chain sum.)
+     SEGMENT OVERLAP TRAP (most common chain-sum error):
+       Drawings often show BOTH a full-span OAL dimension AND shorter step dimensions
+       that start from the same end-face and go part-way. These shorter dims are WITHIN
+       the OAL, not additive beyond it. Example: OAL=4.13 with a step of 2.63 measured
+       from the same face → length_in = 4.13, NOT 4.13 + 2.63 = 6.76.
+       Rule: only sum dimensions whose SEGMENTS are non-overlapping and together cover
+       the full axis end-to-end without duplication. If any two dimensions share the same
+       start or end face, the LARGER one already contains the smaller one — do not add them.
   3. No partial dims either? Estimate axially from the part silhouette using od_in as scale.
       (Confidence 0.60 when estimating.)
     IMPORTANT: If you find a length value in a raw-material (RM) table, title block, or
@@ -306,6 +316,9 @@ Step 1 — Look for a single dimension line that spans the ENTIRE axial extent o
   (from one end-face witness line to the other end-face witness line, parallel to the axis).
   This is usually the LARGEST linear dimension on the part profile.
   Labels: OAL, OVERALL, TOTAL LENGTH, or simply the longest parallel-axis dimension.
+  STOP HERE if found: do NOT add any partial step dimensions to it.
+  A step or shoulder dimension starting from the same end-face is a sub-section WITHIN
+  this OAL — adding it to the OAL would double-count it.
 
 Step 2 — If NO single span-the-full-extent line exists, use the CHAIN SUM fallback:
   List every sequential partial axial dimension (step A, step B, step C, …) that together
@@ -313,6 +326,12 @@ Step 2 — If NO single span-the-full-extent line exists, use the CHAIN SUM fall
   SUM them: length_in = A + B + C + …
   This is the correct OAL when a drawing uses chain dimensioning instead of one overall callout.
   Set confidence to 0.80 when using this fallback.
+  SEGMENT OVERLAP TRAP (critical — the most common chain-sum mistake):
+    Only include segments that are NON-OVERLAPPING and tile the axis from end to end.
+    If dimension X starts at the left face (0) and goes to 2.63, and dimension Y starts
+    at the left face (0) and goes to 4.13, X is INSIDE Y. Sum = 4.13, NOT 4.13 + 2.63.
+    Correct chain sum: find segments A, B, C… where end of A = start of B, end of B = start of C,
+    and the first starts at one end-face and the last ends at the opposite end-face.
 
 Step 3 — If even partial dimensions are absent, ESTIMATE from the part profile silhouette:
   Measure the visual end-to-end axial extent of the part outline relative to a known diameter
@@ -1024,12 +1043,21 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
        to the rightmost end-face. Usually labeled OAL, OVERALL, TOTAL LENGTH, or unlabeled.
        It is typically the LARGEST linear dimension on the part profile.
        → If found and clearly spans the full extent: use it. Confidence 0.90+.
+       → STOP: do NOT add partial step dimensions to it. Any step dimension that starts
+         from the same end-face is a sub-section WITHIN this OAL, not additive beyond it.
   b) CHAIN-SUM FALLBACK — if no single full-span line:
        i.  List EVERY sequential partial axial dimension you can find on the part profile
            (each step width, each shoulder length, each sub-section). Write them all out.
-       ii. SUM them: length_in = A + B + C + …
-       iii.Verify the sum makes visual sense against the part silhouette.
-       iv. Confidence = 0.80. Note: issue = "OAL by chain sum — verify".
+       ii. Only include NON-OVERLAPPING segments that tile the axis end-to-end:
+           end of segment A = start of segment B, end of B = start of C, etc.
+           The first segment must start at one end-face; the last must end at the other.
+       iii.SEGMENT OVERLAP TRAP: if two dimensions both start from the same end-face,
+           they OVERLAP — do NOT sum them. Use only the larger one (or the one that
+           correctly spans to a known shoulder) and continue from there.
+           Example: dims 2.63 and 4.13 both anchor from face 0 → 4.13 contains 2.63;
+           use 4.13 as the OAL, do NOT compute 4.13 + 2.63 = 6.76.
+       iv. SUM them: length_in = A + B + C … Confidence = 0.80.
+       v.  Verify the sum makes visual sense against the part silhouette.
   c) SILHOUETTE ESTIMATE — if even partial dims are absent:
        Visually compare the axial extent of the part outline vs the od_in witness marks.
        Estimate based on the apparent aspect ratio. Confidence = 0.60.
@@ -1335,14 +1363,22 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
 
     a) It runs PARALLEL to the part's axis, regardless of drawing orientation.
     b) It is the end-to-end axial span. For disc/ring parts it may be SMALLER than od_in.
-    c) BLIND-BORE TRAP: if the part has a blind bore (open one end, closed other),
+    c) PRIMARY: look for a SINGLE dimension spanning from one end-face to the other (OAL).
+       If found — STOP. Do NOT add partial step dimensions to it. Any step dimension that
+       starts from the same end-face is a sub-section WITHIN this OAL, not extra length.
+       SEGMENT OVERLAP TRAP (most common chain-sum error on stepped parts):
+         If you see two axial dimensions that both anchor from the SAME end-face (e.g.,
+         2.63\" and 4.13\" both measured from the left face), the larger one (4.13\") already
+         CONTAINS the smaller one. OAL = 4.13\", NOT 4.13 + 2.63 = 6.76\".
+         Only sum dimensions whose segments tile end-to-end without overlap:
+         end of segment A = start of segment B, first starts at one face, last ends at the other.
+    d) BLIND-BORE TRAP: if the part has a blind bore (open one end, closed other),
        the bore DEPTH is NOT the OAL. OAL = bore depth + closed-end wall thickness.
        Always look for a dimension spanning BOTH faces of the part, not just the bore depth.
-    d) All partial feature dims (step widths, groove depths, bore depths) should SUM
-       to approximately length_in — use this to verify. If bore-depth-sum < your
-       length_in candidate, good (there's a wall). If bore-depth-sum > your candidate,
-       you likely picked a partial or bore-depth dimension instead of OAL.
-    e) Raw/cutoff length (max_length_in) is always slightly LONGER than
+    e) All partial feature dims (step widths, groove depths, bore depths) should SUM
+       to approximately length_in — used for VERIFICATION only. If sum > your OAL candidate,
+       you likely picked a partial dim. If sum < your OAL, there is a wall/section not shown.
+    f) Raw/cutoff length (max_length_in) is always slightly LONGER than
        length_in and is found in an RM table or stock notes, not on the
        part profile.
 
