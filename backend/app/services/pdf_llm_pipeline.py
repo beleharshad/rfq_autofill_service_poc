@@ -1784,7 +1784,24 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
           except Exception:
             geom_len = None
 
+          # Sanity check: if LLM is highly confident and geometry disagrees by more
+          # than 2x, trust the LLM — the geometry scale calibration is likely wrong.
+          _llm_len = extracted.get("length_in")
+          _geom_overrides = False
           if geom_len and (float(geom_conf or 0) >= float(GEOM_CONF_THRESHOLD) or scale_valid):
+            if _llm_len:
+              _ratio = float(geom_len) / float(_llm_len)
+              _llm_conf = validation.get("fields", {}).get("length_in", {}).get("confidence", 0)
+              if (_ratio > 2.0 or _ratio < 0.5) and float(_llm_conf or 0) >= 0.85:
+                logger.warning(
+                  "[Pipeline] Skipping geometry length override: geom=%s is %.1fx LLM=%s (llm_conf=%.2f) — trusting LLM",
+                  geom_len, _ratio, _llm_len, float(_llm_conf or 0),
+                )
+              else:
+                _geom_overrides = True
+            else:
+              _geom_overrides = True
+          if _geom_overrides:
             logger.info(
               "[Pipeline] Overriding LLM length_in with geometry-derived total_length_in=%s (geom_conf=%.2f scale_valid=%s)",
               geom_len, float(geom_conf or 0), scale_valid,
