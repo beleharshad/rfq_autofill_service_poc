@@ -169,33 +169,50 @@ function AutoConvertResults({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [odOvr, maxOdOvr, idOvr, lenOvr]);
 
-  // Subscribe to the /llm-stream SSE endpoint while the background LLM thread is running.
-  // The backend pushes exactly ONE message (the full llm_analysis.json) when done.
-  // Zero polling — no repeated requests.
+  // Subscribe to the /llm-stream endpoint while the background LLM thread is running.
+  // Uses fetch + ReadableStream so the API key stays in the X-API-Key header
+  // and never appears in the URL or server access logs.
   useEffect(() => {
     if (!llmAnalysis?.pending) return;
-    // EventSource cannot set custom headers, so pass the internal API key as a
-    // query parameter (equivalent security — both travel over TLS).
     const _apiKey = import.meta.env.VITE_INTERNAL_API_KEY as string | undefined;
-    const _qs = _apiKey ? `?api_key=${encodeURIComponent(_apiKey)}` : '';
-    const es = new EventSource(`${import.meta.env.VITE_API_URL ?? ''}/api/v1/jobs/${jobId}/llm-stream${_qs}`);
-    es.onmessage = (e) => {
+    const url = `${import.meta.env.VITE_API_URL ?? ''}/api/v1/jobs/${jobId}/llm-stream`;
+    const headers: Record<string, string> = {};
+    if (_apiKey) headers['X-API-Key'] = _apiKey;
+    const controller = new AbortController();
+    let active = true;
+
+    (async () => {
       try {
-        const data = JSON.parse(e.data);
-        es.close();
-        if (data?.error_type === 'interrupted') {
-          // Server restarted while LLM was running — silently re-run auto-detect.
-          handleAutoDetect();
-          return;
+        const resp = await globalThis.fetch(url, { headers, signal: controller.signal });
+        if (!resp.ok || !resp.body) return;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (active) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6).trim());
+              if (data?.error_type === 'interrupted') {
+                handleAutoDetect();
+                return;
+              }
+              setLlmAnalysis(data);
+              if (!rfqPartNo.trim() && (data as any).extracted?.part_number) {
+                setRfqPartNo((data as any).extracted.part_number);
+              }
+            } catch { /* ignore malformed message */ }
+          }
         }
-        setLlmAnalysis(data);
-        if (!rfqPartNo.trim() && (data as any).extracted?.part_number) {
-          setRfqPartNo((data as any).extracted.part_number);
-        }
-      } catch { /* ignore malformed message */ }
-    };
-    es.onerror = () => es.close();
-    return () => es.close();
+      } catch { /* aborted or network error */ }
+    })();
+
+    return () => { active = false; controller.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [llmAnalysis?.pending, jobId]);
 
@@ -640,14 +657,24 @@ function AutoConvertResults({
   const geomConf = (partSummary?.inference_metadata?.overall_confidence ?? partSummary?.scale_report?.confidence) ?? 0;
 
   function chooseDim(field: 'od_in' | 'max_od_in' | 'id_in' | 'length_in') {
-    // geometry value if present
     const geomVals: any = stackDims || null;
     const llmVals: any = ed || null;
     const geomHas = geomVals && typeof geomVals[field] === 'number' && geomVals[field] > 0;
-    const useGeom = geomHas && (geomConf >= GEOM_CONF_THRESHOLD || partSummary?.scale_report?.validation_passed);
-    if (useGeom) return { value: geomVals[field], source: 'Geometry' };
-    if (llmVals && typeof llmVals[field] === 'number' && llmVals[field] > 0) return { value: llmVals[field], source: 'LLM' };
-    if (geomHas) return { value: geomVals[field], source: 'Geometry' };
+    const llmHas  = llmVals  && typeof llmVals[field]  === 'number' && llmVals[field]  > 0;
+    const geomConfident = geomHas && (geomConf >= GEOM_CONF_THRESHOLD || partSummary?.scale_report?.validation_passed);
+
+    // Sanity check: if both sources have values and they differ by more than 2×,
+    // the geometry pipeline is miscalibrated — prefer LLM.
+    if (geomConfident && llmHas) {
+      const ratio = (geomVals[field] as number) / (llmVals[field] as number);
+      if (ratio > 2.0 || ratio < 0.5) {
+        return { value: llmVals[field] as number, source: 'LLM' };
+      }
+    }
+
+    if (geomConfident) return { value: geomVals[field] as number, source: 'Geometry' };
+    if (llmHas) return { value: llmVals[field] as number, source: 'LLM' };
+    if (geomHas) return { value: geomVals[field] as number, source: 'Geometry' };
     return { value: 0, source: 'Unknown' };
   }
 
