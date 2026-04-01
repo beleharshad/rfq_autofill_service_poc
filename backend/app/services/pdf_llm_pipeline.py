@@ -91,6 +91,34 @@ Return ONLY a valid JSON object with these exact keys (null if genuinely not fou
 }
 
 
+=== PART SHAPE CLASSIFICATION (do this FIRST before assigning any dimension) ===
+
+Before reading any number off the drawing, identify what kind of part you are looking at:
+
+  DISC / RING / BUSHING / WASHER / SHORT SLEEVE:
+    Visual: the part looks wider than it is tall/long in the main profile view.
+    Characteristic: od_in is LARGER than length_in. This is normal and correct.
+    Examples: spacer (OD=1.38", L=0.50"), bushing (OD=1.25", L=0.75"), ring.
+    TRAP: do NOT assume "largest number = length_in". For a disc/ring part, the
+    largest Phi-prefixed number is od_in -- it exceeds the length.
+
+  SHAFT / BARREL / LONG PART:
+    Visual: the part is noticeably longer than it is wide.
+    Characteristic: length_in is LARGER than od_in. The typical case.
+
+  PHI SYMBOL RULE (universal -- applies to ALL part shapes):
+    ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" / "D=" = a DIAMETER.
+    DIAMETER callouts are NEVER length_in, regardless of their magnitude.
+    OCR renders Phi as: "Ø", "/O", "O", "Dia", "D" -- check carefully for this prefix.
+    If the LARGEST number on the drawing has a Phi prefix → it is od_in, not length_in.
+
+  MATERIAL CONTEXT HINT:
+    If the material field contains "FLAT", "FLAT BAR", "CD FLAT", "PLATE", "SHEET",
+    the part may be a disc, ring, bracket, or spacer cut from flat stock.
+    od_in still represents the largest outer cross-sectional dimension of the finished part.
+    length_in is the overall axial thickness/length.
+
+
 === FUNDAMENTAL CONCEPT: WHAT EACH FIELD MEANS ===
 
 od_in  (Finish OD) -- THE MAXIMUM OUTER DIAMETER OF THE FINISHED PART:
@@ -892,6 +920,15 @@ STEP 1 -- UNDERSTAND THE DRAWING ORIENTATION
   (typically shown by a center-line: long-dash short-dash pattern).
   The part profile is drawn symmetrically about that center-line.
 
+STEP 1B -- CLASSIFY PART SHAPE (before assigning any number to any field)
+  Look at the overall outline of the part in the main view and decide:
+    DISC / RING shape: the part outline is wider than it is long along the axis.
+      od_in CAN be larger than length_in — this is correct for bushings, spacers, rings.
+      Do NOT default "largest number = length_in" for these parts.
+    SHAFT shape: the part is longer along its axis than it is wide.
+      length_in will be larger than od_in — the typical case.
+  Write down your shape classification before reading any dimensions.
+
 STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
   The Finish OD is the MAXIMUM outer diameter of the finished part.
   How to find it visually, regardless of orientation:
@@ -904,6 +941,11 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
        LARGEST value is od_in.
     e) Raw/RM dimensions appear in a SEPARATE table or notes block --
        do NOT use those as od_in.
+  PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
+    ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
+    Even if the Phi-prefixed number is the LARGEST number on the drawing —
+    a Phi prefix means it is od_in or id_in, NEVER length_in.
+    OCR renders Phi as: "Ø", "/O", "O", "Dia", "D" — check for it before every number.
 
 STEP 3 -- FIND THE BORE / INNER DIAMETER (id_in)
   The bore diameter is the WIDTH of the hole inside the part — NOT how deep it goes.
@@ -951,6 +993,15 @@ STEP 3 -- FIND THE BORE / INNER DIAMETER (id_in)
 
 STEP 4 -- FIND THE OVERALL LENGTH (length_in)
   Overall length = end-to-end finished span PARALLEL to the part's axis. It is NOT a diameter.
+
+  DIMENSION DIRECTION RULE — always apply this before assigning length_in:
+    LENGTH dimensions: witness lines run PARALLEL to the part axis. NO Phi/Ø prefix.
+    DIAMETER dimensions: witness lines run PERPENDICULAR to the axis. ALWAYS Phi-prefixed.
+    For a DISC / RING part (where od_in > length_in), the OD witness lines may span the
+    visually "widest" extent of the drawing — but they measure width perpendicular to axis
+    and carry a Phi prefix. That Phi-prefixed number is od_in, NOT length_in.
+    The length witness lines span the SHORT axial thickness and have NO Phi prefix.
+    Rule: NEVER assign a Phi-prefixed callout to length_in, regardless of its magnitude.
 
   BLIND-BORE CRITICAL WARNING (pistons, cups, cylinders, receivers):
     If the part is a BLIND-BORE part (open on one end, closed wall on the other):
@@ -1221,6 +1272,15 @@ STEP 1 -- UNDERSTAND THE DRAWING ORIENTATION
   (typically shown by a center-line: long-dash short-dash pattern).
   The part profile is drawn symmetrically about that center-line.
 
+STEP 1B -- CLASSIFY PART SHAPE (before assigning any number to any field)
+  Look at the overall outline of the part in the main view and decide:
+    DISC / RING shape: the part outline is wider than it is long along the axis.
+      od_in CAN be larger than length_in — correct for bushings, spacers, rings, washers.
+      Do NOT default "largest number = length_in" for these parts.
+    SHAFT shape: the part is longer along its axis than it is wide.
+      length_in will be larger than od_in — the typical case.
+  Write down your shape classification before reading any dimensions.
+
 STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
   The Finish OD is the MAXIMUM outer diameter of the finished part.
   How to find it visually, regardless of orientation:
@@ -1238,6 +1298,11 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
        LESS than od_in unless they define the outermost extent.
     e) Raw/RM dimensions appear in a SEPARATE table or notes block away
        from the part profile -- do NOT use those as od_in.
+  PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
+    ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
+    Even if the Phi-prefixed number is the LARGEST number on the drawing —
+    a Phi prefix means it is od_in or id_in, NEVER length_in.
+    OCR renders Phi as: "Ø", "/O", "O", "Dia", "D" — always check for this prefix.
 
 STEP 3 -- FIND THE BORE / INNER DIAMETER (id_in)
   id_in is the primary finished bore inside the part.
@@ -1260,8 +1325,16 @@ STEP 3 -- FIND THE BORE / INNER DIAMETER (id_in)
 
 STEP 4 -- FIND THE OVERALL LENGTH (length_in)
   length_in is the end-to-end finished span of the entire part:
+
+  DIMENSION DIRECTION RULE — apply before assigning length_in:
+    LENGTH: witness lines PARALLEL to the axis, NO Phi/Ø prefix.
+    DIAMETER: witness lines PERPENDICULAR to the axis, ALWAYS Phi-prefixed.
+    For a DISC / RING (od_in > length_in), the OD witness lines span the widest visual
+    extent but carry a Phi prefix — that number is od_in, NOT length_in.
+    NEVER assign a Phi-prefixed callout to length_in regardless of its magnitude.
+
     a) It runs PARALLEL to the part's axis, regardless of drawing orientation.
-    b) It is typically the LARGEST linear dimension on the part.
+    b) It is the end-to-end axial span. For disc/ring parts it may be SMALLER than od_in.
     c) BLIND-BORE TRAP: if the part has a blind bore (open one end, closed other),
        the bore DEPTH is NOT the OAL. OAL = bore depth + closed-end wall thickness.
        Always look for a dimension spanning BOTH faces of the part, not just the bore depth.
