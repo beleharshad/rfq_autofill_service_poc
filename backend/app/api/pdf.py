@@ -171,6 +171,48 @@ async def llm_stream(job_id: str):
     )
 
 
+@router.post("/jobs/{job_id}/rerun_llm")
+async def rerun_llm(job_id: str):
+    """Delete any cached llm_analysis.json and re-run the LLM pipeline.
+
+    Use this to recover from a previously failed LLM run (e.g. text-extraction
+    error, rate-limit, or server-side availability issue).
+    """
+    try:
+        job_service.get_job(job_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    inputs_path = job_service.file_storage.get_inputs_path(job_id)
+    outputs_path = job_service.file_storage.get_outputs_path(job_id)
+    pdf_path = inputs_path / "source.pdf"
+
+    if not pdf_path.exists():
+        raise HTTPException(status_code=400, detail="source.pdf not found for this job")
+
+    # Clear the cached (errored) result and reset the SSE event
+    llm_out = outputs_path / "llm_analysis.json"
+    try:
+        llm_out.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _get_llm_event(job_id).clear()
+
+    # Write pending stub immediately so the frontend knows work is in progress
+    stub = _pending_stub()
+    llm_out.write_text(json.dumps(stub, indent=2), encoding="utf-8")
+
+    import threading as _threading
+    t = _threading.Thread(
+        target=_run_llm_background,
+        args=(pdf_path, outputs_path, job_id),
+        daemon=True,
+    )
+    t.start()
+
+    return {"job_id": job_id, "status": "llm_restarted", "pending": True}
+
+
 @router.post("/jobs/{job_id}/pdf/upload")
 async def upload_pdf(job_id: str, file: UploadFile = File(...)):
     """Upload PDF and render page images at 300 DPI.

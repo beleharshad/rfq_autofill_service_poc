@@ -14,9 +14,42 @@ import {
   RFQEnvelopeRequest,
   RunReport,
   LLMAnalysisResult,
+  CorrectionsMap,
 } from './types';
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
+
+/**
+ * Internal shared secret sent with every backend request as `X-API-Key`.
+ * Set VITE_INTERNAL_API_KEY in your .env file to match the backend
+ * INTERNAL_API_KEY value.  When the variable is absent (local dev without
+ * a key configured) requests are sent without the header so the backend's
+ * dev-mode bypass still works.
+ */
+const _INTERNAL_API_KEY: string | undefined = import.meta.env.VITE_INTERNAL_API_KEY;
+
+/** Build headers that always include the internal API key when configured. */
+function _buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (_INTERNAL_API_KEY) {
+    headers['X-API-Key'] = _INTERNAL_API_KEY;
+  }
+  return headers;
+}
+
+/** Wrapper around fetch() that injects X-API-Key on every request. */
+async function _fetch(input: string, init?: RequestInit): Promise<Response> {
+  const existing = (init?.headers ?? {}) as Record<string, string>;
+  return globalThis.fetch(input, {
+    ...init,
+    headers: _buildHeaders(existing),
+  });
+}
+
+// Shadow the global `fetch` within this module so every api call in this file
+// automatically carries the X-API-Key header without touching each call-site.
+// eslint-disable-next-line no-shadow
+const fetch = _fetch;
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -834,6 +867,33 @@ export const api = {
       `${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/llm-analysis/export-excel`
     );
     return handleBlobResponse(response);
+  },
+
+  /**
+   * Persist a single user-corrected dimension for a job.
+   * Corrections are stored server-side as outputs/corrections.json.
+   */
+  async saveCorrection(
+    jobId: string,
+    field: string,
+    value: number | string,
+    originalValue: number | string | null,
+  ): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/corrections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field, value, original_value: originalValue }),
+    });
+    await handleResponse<unknown>(response);
+  },
+
+  /**
+   * Return the persisted dimension corrections map for a job.
+   * Returns an empty object when no corrections have been saved yet.
+   */
+  async getCorrections(jobId: string): Promise<CorrectionsMap> {
+    const response = await fetch(`${API_BASE_URL}/llm/jobs/${encodeURIComponent(jobId)}/corrections`);
+    return handleResponse<CorrectionsMap>(response);
   },
 
   // ── 3D Preview (OCC B-Rep → STEP → GLB) ─────────────────────────────────

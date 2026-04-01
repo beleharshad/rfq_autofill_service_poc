@@ -10,7 +10,7 @@ function App() {
       <div className="app">
         <header className="app-header">
           <Link to="/" className="app-title">
-            RFQ 3D View
+            QuoteMyCAD
           </Link>
         </header>
         <main className="app-main">
