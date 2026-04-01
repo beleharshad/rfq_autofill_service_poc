@@ -365,6 +365,17 @@ export interface LLMValidationReport {
   recommendation: 'ACCEPT' | 'REVIEW' | 'REJECT';
 }
 
+// ---- Human-in-the-Loop Dimension Corrections ----
+
+export interface DimCorrection {
+  field: string;
+  value: number | string;
+  original_value: number | string | null;
+  corrected_at: string;
+}
+
+export type CorrectionsMap = Record<string, DimCorrection>;
+
 export interface LLMAnalysisResult {
   available?: boolean;
   /** True while the background LLM thread is still running. Poll until false/absent. */
