@@ -1221,7 +1221,7 @@ class FeatureExtractor:
                           If None, uses origin (0, 0).
         """
         if _CONVENTIONS_AVAILABLE:
-            from geometry_2d import Point2D
+            from app.geometry.geometry_2d import Point2D
             if axis_point_2d is None:
                 axis_point_2d = Point2D(0.0, 0.0)
             self._ref_axis = get_reference_axis(axis_point_2d)

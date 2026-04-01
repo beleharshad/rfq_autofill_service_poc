@@ -56,7 +56,7 @@ except ImportError:
     STEPControl_Writer = None
     Interface_Static = None
 
-from geometry_2d import Profile2D, LineSegment, ArcSegment, Point2D
+from app.geometry.geometry_2d import Profile2D, LineSegment, ArcSegment, Point2D
 
 
 class RevolvedSolidBuilder:
