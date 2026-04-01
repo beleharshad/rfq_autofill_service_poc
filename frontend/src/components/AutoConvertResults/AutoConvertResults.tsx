@@ -657,22 +657,11 @@ function AutoConvertResults({
   const geomConf = (partSummary?.inference_metadata?.overall_confidence ?? partSummary?.scale_report?.confidence) ?? 0;
 
   function chooseDim(field: 'od_in' | 'max_od_in' | 'id_in' | 'length_in') {
-    const geomVals: any = stackDims || null;
     const llmVals: any = ed || null;
+    const geomVals: any = stackDims || null;
+    const llmHas  = llmVals && typeof llmVals[field] === 'number' && llmVals[field] > 0;
     const geomHas = geomVals && typeof geomVals[field] === 'number' && geomVals[field] > 0;
-    const llmHas  = llmVals  && typeof llmVals[field]  === 'number' && llmVals[field]  > 0;
-    const geomConfident = geomHas && (geomConf >= GEOM_CONF_THRESHOLD || partSummary?.scale_report?.validation_passed);
-
-    // Sanity check: if both sources have values and they differ by more than 2×,
-    // the geometry pipeline is miscalibrated — prefer LLM.
-    if (geomConfident && llmHas) {
-      const ratio = (geomVals[field] as number) / (llmVals[field] as number);
-      if (ratio > 2.0 || ratio < 0.5) {
-        return { value: llmVals[field] as number, source: 'LLM' };
-      }
-    }
-
-    if (geomConfident) return { value: geomVals[field] as number, source: 'Geometry' };
+    // Always prefer LLM; fall back to geometry only when LLM has no value.
     if (llmHas) return { value: llmVals[field] as number, source: 'LLM' };
     if (geomHas) return { value: geomVals[field] as number, source: 'Geometry' };
     return { value: 0, source: 'Unknown' };
