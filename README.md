@@ -6,7 +6,6 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://typescriptlang.org)
-[![LLM](https://img.shields.io/badge/LLM-GPT--4o%20%7C%20Gemini-orange)](https://openai.com)
 
 ---
 
@@ -26,7 +25,7 @@ Manufacturing procurement teams spend **4–8 hours per RFQ** manually reading e
 ```
 Upload (STEP or PDF)
     ↓
-AI Dimension Extraction  ←  LLM (GPT-4o / Gemini) + OCR
+AI Dimension Extraction  ←  Intelligent document understanding + OCR
     ↓
 Geometry Analysis        ←  3D feature detection (holes, slots, turned profiles)
     ↓
@@ -46,17 +45,13 @@ What used to take hours now takes **under 60 seconds**.
 | Capability | Detail |
 |---|---|
 | **STEP → 3D Geometry** | Parses solid models, extracts OD/ID/Length envelope, detects turned profile, holes, and slots |
-| **PDF → AI Extraction** | OCR (EasyOCR/Tesseract) + LLM reads any engineering drawing — text-based or fully scanned |
-| **Intelligent Dimension Override** | LLM-extracted values take precedence over geometry estimates, ensuring drawing intent is preserved |
+| **PDF → AI Extraction** | Reads any engineering drawing — text-based or fully scanned — and extracts structured dimensions |
+| **Intelligent Dimension Override** | AI-extracted values take precedence over geometry estimates, ensuring drawing intent is preserved |
 | **Live Excel Export** | Exports vendor-ready `.xlsx` with full formula chain — change any cell and everything cascades |
 | **Real-time FX Rate** | Live USD → INR conversion via external API, with 1-hour caching and graceful fallback |
 | **Vendor Quote Mode** | Per-part cost breakdown: material, roughing, turning, VMC, special process, OH&P, rejection |
 | **In-browser 3D Viewer** | Interactive GLB model rendered directly in the browser — no plugin required |
 | **REST API** | Every feature is API-first — integrate with ERP, PLM, or procurement portals |
-
----
-
-## Project Structure
 
 ---
 
@@ -66,7 +61,7 @@ What used to take hours now takes **under 60 seconds**.
 
 Upload any `.step` or `.stp` solid model. The system:
 
-1. Parses the 3D geometry with `trimesh` and custom lathe-profile extraction
+1. Parses the 3D geometry with a custom feature extraction engine
 2. Detects the maximum OD, bore ID, overall length, holes, slots, and machined features
 3. Renders an interactive 3D GLB model in the browser (no CAD software required)
 4. Computes finish dimensions → raw material blank dimensions (OD + 0.1", length + 0.35")
@@ -77,11 +72,11 @@ Upload any `.step` or `.stp` solid model. The system:
 
 Upload any engineering drawing — searchable or fully scanned. The system:
 
-1. Extracts text via `pdfplumber`; falls back to EasyOCR + Tesseract for image-based PDFs
-2. Sends extracted content to **GPT-4o or Google Gemini** for structured dimension extraction
+1. Extracts text from the document; falls back to OCR for image-based PDFs
+2. Uses AI to understand and extract structured dimensions from the drawing
 3. Returns `OD`, `ID`, `Length`, `Material`, `Quantity` with **confidence scores** per field
-4. User reviews extracted values in the LLM Analysis panel before committing
-5. LLM-extracted dimensions are passed as authoritative overrides — geometry estimates never shadow drawing intent
+4. User reviews extracted values in the AI Analysis panel before committing
+5. AI-extracted dimensions are passed as authoritative overrides — geometry estimates never shadow drawing intent
 6. Same Excel export pipeline as Mode 1
 
 ---
@@ -90,48 +85,14 @@ Upload any engineering drawing — searchable or fully scanned. The system:
 
 | Layer | Technology | Why |
 |---|---|---|
-| **Backend API** | FastAPI + uvicorn | Async, production-grade, auto-generates OpenAPI docs |
-| **Geometry engine** | trimesh + custom lathe extractor | Handles real-world STEP files; extracts turned-part profiles |
-| **OCR** | EasyOCR + Tesseract | Dual-engine redundancy; handles degraded scans |
-| **LLM** | OpenAI GPT-4o / Google Gemini | Provider-agnostic; swap without code changes |
+| **Backend API** | FastAPI + uvicorn | Async, production-grade Python web framework |
+| **Geometry engine** | Custom 3D feature extractor | Handles real-world STEP files; extracts turned-part profiles |
+| **OCR** | Dual-engine OCR pipeline | Redundancy for degraded scans |
+| **AI Engine** | Proprietary AI pipeline | Provider-agnostic intelligent document understanding |
 | **Excel export** | openpyxl (formula-injected) | Live formula chain; `fullCalcOnLoad` — any cell edit cascades |
 | **Currency** | Live FX API + 1h cache | Fresh rates; graceful fallback prevents export failures |
 | **Frontend** | React 18 + TypeScript + Vite | Type-safe, HMR dev experience, production build optimised |
 | **3D viewer** | Three.js GLB renderer | In-browser; no plugin; works on every OS |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Browser (React + TypeScript)           │
-│  ┌────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │  New Job   │  │  Job Page    │  │  3D Viewer      │  │
-│  │  Upload UI │  │  LLM Panel   │  │  (Three.js GLB) │  │
-│  └────────────┘  └──────────────┘  └─────────────────┘  │
-└──────────────────────────┬──────────────────────────────┘
-                           │ REST / JSON
-┌──────────────────────────▼──────────────────────────────┐
-│               FastAPI Backend (Python 3.9+)              │
-│                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │  jobs API   │  │   rfq API    │  │  llm_pdf API   │  │
-│  └──────┬──────┘  └──────┬───────┘  └───────┬────────┘  │
-│         │                │                  │            │
-│  ┌──────▼──────────────────────────────────▼────────┐   │
-│  │                  Service Layer                    │   │
-│  │  geometry_envelope  │  rfq_excel_export           │   │
-│  │  pdf_llm_pipeline   │  currency_service           │   │
-│  │  llm_service        │  feature_detection          │   │
-│  └───────────────────────────────────────────────────┘   │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │  External                                         │   │
-│  │  OpenAI GPT-4o  │  Gemini  │  FX Rate API        │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
 
 ---
 
@@ -169,14 +130,13 @@ Change the RM Rate, tweak the Qty, update the exchange rate — every downstream
 | Python 3.9+ | `python --version` |
 | Node.js 18+ | `node --version` |
 | Tesseract OCR | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) — add to PATH |
-| OpenAI **or** Gemini API key | Set in `backend/.env` |
+| AI API key | Set in `backend/.env` (contact admin for key) |
 
 ### 1. Configure environment
 
 ```bash
-# backend/.env
-OPENAI_API_KEY=sk-...        # OpenAI GPT-4o
-# GOOGLE_API_KEY=AIza...     # or Google Gemini
+# backend/.env  — contact admin for the correct values
+# DO NOT commit this file
 ```
 
 ### 2. Start the backend
@@ -188,7 +148,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-→ API live at **http://localhost:8000** · Docs at **http://localhost:8000/docs**
+→ API live at **http://localhost:8000**
 
 ### 3. Start the frontend
 
@@ -200,8 +160,6 @@ npm run dev
 
 → App live at **http://localhost:5173**
 
-> Full walkthrough with the PDF workflow: [QUICK_START_PDF_RFQ.md](QUICK_START_PDF_RFQ.md)
-
 ---
 
 ## API Reference
@@ -212,15 +170,9 @@ npm run dev
 | `POST` | `/api/v1/jobs` | Create job, upload STEP or PDF |
 | `GET` | `/api/v1/jobs/{id}` | Job status + metadata |
 | `GET` | `/api/v1/jobs/{id}/3d-preview` | Stream GLB model |
-| `POST` | `/api/v1/llm/jobs/{id}/llm-analyze` | Trigger async LLM extraction |
-| `GET` | `/api/v1/llm/jobs/{id}/llm-analysis` | Poll / retrieve LLM result |
-| `GET` | `/api/v1/llm/jobs/{id}/llm-analysis/export-excel` | Excel from LLM result |
 | `POST` | `/api/v1/rfq/autofill` | Autofill from geometry |
 | `POST` | `/api/v1/rfq/export_xlsx` | Export filled RFQ Excel |
 | `GET` | `/api/v1/rfq/exchange_rate` | Live USD → INR rate |
-| `POST` | `/api/v1/rfq/autofill_from_pdf` | Full PDF → autofill pipeline |
-
-Interactive Swagger UI: **http://localhost:8000/docs**
 
 ---
 
@@ -229,8 +181,7 @@ Interactive Swagger UI: **http://localhost:8000/docs**
 1. **Dual-input AI pipeline** — same output regardless of whether the source is a 3D model or a scanned PDF, with intelligent override priority
 2. **Formula-native export** — the Excel file is not a snapshot; it is a live calculation engine that vendors can work with directly
 3. **Geometry-aware RM sizing** — RM OD, ID, and stock length are computed from the actual turned-profile envelope, not generic rules
-4. **LLM provider agnostic** — OpenAI and Gemini are interchangeable; vendor lock-in risk is eliminated
-5. **Human-in-the-loop confidence gating** — every LLM inference surface includes per-field confidence scores; low-confidence outputs are flagged before any export is committed
+4. **Human-in-the-loop confidence gating** — every AI inference includes per-field confidence scores; low-confidence outputs are flagged before any export is committed
 
 ---
 
@@ -239,8 +190,8 @@ Interactive Swagger UI: **http://localhost:8000/docs**
 - [ ] Multi-part batch processing (RFQ with 50+ line items in one upload)
 - [ ] ERP / PLM webhook integration (SAP, Oracle, Odoo)
 - [ ] Supplier comparison mode (parallel quotes from multiple vendors)
-- [ ] Historical RFQ learning (fine-tune on accepted quotes to improve cost accuracy)
-- [ ] Cloud deployment (Docker + Kubernetes manifests)
+- [ ] Historical RFQ learning (improve cost accuracy over time)
+- [ ] Cloud deployment
 
 ---
 
