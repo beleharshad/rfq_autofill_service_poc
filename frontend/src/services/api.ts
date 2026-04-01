@@ -19,6 +19,38 @@ import {
 
 const API_BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
 
+/**
+ * Internal shared secret sent with every backend request as `X-API-Key`.
+ * Set VITE_INTERNAL_API_KEY in your .env file to match the backend
+ * INTERNAL_API_KEY value.  When the variable is absent (local dev without
+ * a key configured) requests are sent without the header so the backend's
+ * dev-mode bypass still works.
+ */
+const _INTERNAL_API_KEY: string | undefined = import.meta.env.VITE_INTERNAL_API_KEY;
+
+/** Build headers that always include the internal API key when configured. */
+function _buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (_INTERNAL_API_KEY) {
+    headers['X-API-Key'] = _INTERNAL_API_KEY;
+  }
+  return headers;
+}
+
+/** Wrapper around fetch() that injects X-API-Key on every request. */
+async function _fetch(input: string, init?: RequestInit): Promise<Response> {
+  const existing = (init?.headers ?? {}) as Record<string, string>;
+  return globalThis.fetch(input, {
+    ...init,
+    headers: _buildHeaders(existing),
+  });
+}
+
+// Shadow the global `fetch` within this module so every api call in this file
+// automatically carries the X-API-Key header without touching each call-site.
+// eslint-disable-next-line no-shadow
+const fetch = _fetch;
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));

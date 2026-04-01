@@ -174,7 +174,11 @@ function AutoConvertResults({
   // Zero polling — no repeated requests.
   useEffect(() => {
     if (!llmAnalysis?.pending) return;
-    const es = new EventSource(`${import.meta.env.VITE_API_URL ?? ''}/api/v1/jobs/${jobId}/llm-stream`);
+    // EventSource cannot set custom headers, so pass the internal API key as a
+    // query parameter (equivalent security — both travel over TLS).
+    const _apiKey = import.meta.env.VITE_INTERNAL_API_KEY as string | undefined;
+    const _qs = _apiKey ? `?api_key=${encodeURIComponent(_apiKey)}` : '';
+    const es = new EventSource(`${import.meta.env.VITE_API_URL ?? ''}/api/v1/jobs/${jobId}/llm-stream${_qs}`);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);

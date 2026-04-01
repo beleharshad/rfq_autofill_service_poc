@@ -1,5 +1,7 @@
 """FastAPI application entry point."""
 
+import os
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -10,39 +12,51 @@ _trace_fh.setLevel(logging.INFO)
 _trace_fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
 logging.getLogger().addHandler(_trace_fh)
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq, envelope, llm, llm_pdf, preview3d
+from app.security import require_api_key
+
+# In production (PRODUCTION=true) disable the interactive Swagger/ReDoc UIs so
+# the full API surface is not publicly browseable via /docs or /redoc.
+_is_production = os.environ.get("PRODUCTION", "").lower() in ("1", "true", "yes")
 
 app = FastAPI(
     title="RFQ 3D View API",
     description="API for manufacturing feature extraction from turned parts",
-    version="0.1.0"
+    version="0.1.0",
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
 )
 
-# CORS configuration for frontend development
+# CORS configuration – expand with production origin when ALLOWED_ORIGINS env var is set.
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite default port
+    allow_origins=["http://localhost:5173", "http://localhost:3000"] + _extra_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key"],
 )
 
+# Shared security dependency – all non-health routes require a valid X-API-Key.
+_auth = [Depends(require_api_key)]
+
 # Include routers
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
-app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
-app.include_router(profiles.router, prefix="/api/v1", tags=["profiles"])
-app.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"])
-app.include_router(profile2d.router, prefix="/api/v1", tags=["profile2d"])
-app.include_router(pdf.router, prefix="/api/v1", tags=["pdf"])
-app.include_router(manual.router, prefix="/api/v1", tags=["manual"])
-app.include_router(step_generation.router, prefix="/api/v1", tags=["step-generation"])
-app.include_router(rfq.router)
-app.include_router(envelope.router)
-app.include_router(llm.router, prefix="/api/v1/llm", tags=["llm"])
-app.include_router(llm_pdf.router, prefix="/api/v1/llm", tags=["llm-pdf"])
-app.include_router(preview3d.router, prefix="/api/v1", tags=["3d-preview"])
+app.include_router(health.router, prefix="/api/v1", tags=["health"])  # public – no auth
+app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"], dependencies=_auth)
+app.include_router(profiles.router, prefix="/api/v1", tags=["profiles"], dependencies=_auth)
+app.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"], dependencies=_auth)
+app.include_router(profile2d.router, prefix="/api/v1", tags=["profile2d"], dependencies=_auth)
+app.include_router(pdf.router, prefix="/api/v1", tags=["pdf"], dependencies=_auth)
+app.include_router(manual.router, prefix="/api/v1", tags=["manual"], dependencies=_auth)
+app.include_router(step_generation.router, prefix="/api/v1", tags=["step-generation"], dependencies=_auth)
+app.include_router(rfq.router, dependencies=_auth)
+app.include_router(envelope.router, dependencies=_auth)
+app.include_router(llm.router, prefix="/api/v1/llm", tags=["llm"], dependencies=_auth)
+app.include_router(llm_pdf.router, prefix="/api/v1/llm", tags=["llm-pdf"], dependencies=_auth)
+app.include_router(preview3d.router, prefix="/api/v1", tags=["3d-preview"], dependencies=_auth)
 
 
 @app.on_event("startup")
