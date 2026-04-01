@@ -652,9 +652,7 @@ function AutoConvertResults({
       length_in: zRange[1] - zRange[0],
     };
   })() : null;
-  // Decide which source to use per-dimension (Geometry vs LLM)
-  const GEOM_CONF_THRESHOLD = 0.8;
-  const geomConf = (partSummary?.inference_metadata?.overall_confidence ?? partSummary?.scale_report?.confidence) ?? 0;
+  // Decide which source to use per-dimension (LLM preferred, Geometry as fallback)
 
   function chooseDim(field: 'od_in' | 'max_od_in' | 'id_in' | 'length_in') {
     const llmVals: any = ed || null;
