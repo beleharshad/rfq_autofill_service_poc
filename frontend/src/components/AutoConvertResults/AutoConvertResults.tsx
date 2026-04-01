@@ -263,7 +263,7 @@ function AutoConvertResults({
       // inferred_stack.json
       const inferredStackFile = files.files.find((f) => f.path === 'outputs/inferred_stack.json');
       if (inferredStackFile) {
-        const res = await fetch(api.getPdfUrl(jobId, inferredStackFile.path));
+        const res = await api.fetchJobFile(jobId, inferredStackFile.path);
         if (res.ok) {
           const data = await res.json();
           foundInferredStack = true;
@@ -286,7 +286,7 @@ function AutoConvertResults({
       // part_summary.json
       const partSummaryFile = files.files.find((f) => f.path === 'outputs/part_summary.json');
       if (partSummaryFile) {
-        const res = await fetch(api.getPdfUrl(jobId, partSummaryFile.path));
+        const res = await api.fetchJobFile(jobId, partSummaryFile.path);
         if (res.ok) {
           const data = await res.json();
           setPartSummary(data);
@@ -311,7 +311,7 @@ function AutoConvertResults({
       const llmFile = files.files.find((f) => f.path === 'outputs/llm_analysis.json');
       if (llmFile) {
         try {
-          const res = await fetch(api.getPdfUrl(jobId, llmFile.path), { cache: 'no-store' });
+          const res = await api.fetchJobFile(jobId, llmFile.path, { cache: 'no-store' });
           if (res.ok) {
             const data = await res.json();
             if (data?.error_type === 'interrupted') {
@@ -345,8 +345,7 @@ function AutoConvertResults({
     const pdfFile = files.files.find((f) => f.name.toLowerCase().endsWith('.pdf'));
     if (!pdfFile) throw new Error('No PDF file found. Please upload a PDF first.');
 
-    const pdfUrl = api.getPdfUrl(jobId, pdfFile.path);
-    const pdfResponse = await fetch(pdfUrl);
+    const pdfResponse = await api.fetchJobFile(jobId, pdfFile.path);
     const pdfBlob = await pdfResponse.blob();
     const pdfFileObj = new File([pdfBlob], pdfFile.name, { type: 'application/pdf' });
     await api.uploadPdf(jobId, pdfFileObj);

@@ -178,6 +178,20 @@ export const api = {
   },
 
   /**
+   * Fetch a job file with the X-API-Key header and return the raw Response.
+   * Use this in components that need to call fetch() themselves (e.g. to parse
+   * JSON) — it ensures the header is always included regardless of which
+   * module calls it. The global fetch() in component files does NOT have the
+   * api.ts module-level shadow applied.
+   */
+  async fetchJobFile(jobId: string, filePath: string, init?: RequestInit): Promise<Response> {
+    return _fetch(
+      `${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`,
+      init,
+    );
+  },
+
+  /**
    * Download a file programmatically to ensure it goes to Downloads folder.
    * Fetches the file as a blob and triggers browser download.
    * Includes retry logic for files that might still be writing to disk.
