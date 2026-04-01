@@ -1777,44 +1777,31 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
           geom_conf = ps.get("inference_metadata", {}).get("overall_confidence")
           if geom_conf is None:
             geom_conf = ps.get("scale_report", {}).get("confidence", 0)
-          scale_valid = ps.get("scale_report", {}).get("validation_passed", False)
           geom_len = None
           try:
             geom_len = ps.get("totals", {}).get("total_length_in")
           except Exception:
             geom_len = None
 
-          # Sanity check: if LLM is highly confident and geometry disagrees by more
-          # than 2x, trust the LLM — the geometry scale calibration is likely wrong.
+          # Only fill length from geometry when LLM did NOT extract one.
+          # Never override a value the LLM already found — geometry scale is unreliable.
           _llm_len = extracted.get("length_in")
-          _geom_overrides = False
-          if geom_len and (float(geom_conf or 0) >= float(GEOM_CONF_THRESHOLD) or scale_valid):
-            if _llm_len:
-              _ratio = float(geom_len) / float(_llm_len)
-              _llm_conf = validation.get("fields", {}).get("length_in", {}).get("confidence", 0)
-              if (_ratio > 2.0 or _ratio < 0.5) and float(_llm_conf or 0) >= 0.85:
-                logger.warning(
-                  "[Pipeline] Skipping geometry length override: geom=%s is %.1fx LLM=%s (llm_conf=%.2f) — trusting LLM",
-                  geom_len, _ratio, _llm_len, float(_llm_conf or 0),
-                )
-              else:
-                _geom_overrides = True
-            else:
-              _geom_overrides = True
-          if _geom_overrides:
+          _llm_len_missing = not _llm_len or float(_llm_len) <= 0
+          if geom_len and _llm_len_missing:
             logger.info(
-              "[Pipeline] Overriding LLM length_in with geometry-derived total_length_in=%s (geom_conf=%.2f scale_valid=%s)",
-              geom_len, float(geom_conf or 0), scale_valid,
+              "[Pipeline] Filling missing length_in from geometry total_length_in=%s (geom_conf=%.2f)",
+              geom_len, float(geom_conf or 0),
             )
             extracted["length_in"] = geom_len
             cross = validation.get("cross_checks", []) or []
             cross.append(
-              f"length_in overridden by geometry-derived value ({geom_len} in, geom_conf={float(geom_conf or 0):.2f})"
+              f"length_in filled from geometry (LLM had no value): {geom_len} in, geom_conf={float(geom_conf or 0):.2f}"
             )
             validation["cross_checks"] = cross
-            # --- attempt to fill missing ID from geometry segments ---
-            try:
-              # prefer a high-confidence, long axial-span segment with a non-trivial id_diameter
+
+          # Only fill id_in from geometry when LLM did NOT extract one.
+          try:
+            if extracted.get("id_in") is None or float(extracted.get("id_in") or 0) <= 0:
               segs = ps.get("segments", [])
               best_seg = None
               best_score = 0.0
@@ -1824,15 +1811,12 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                   continue
                 conf = float(s.get("confidence") or 0)
                 span = float(s.get("z_end", 0) or 0) - float(s.get("z_start", 0) or 0)
-                # score by span * confidence to prefer long, confident bores (main bores)
                 score = span * conf
                 if score > best_score:
                   best_score = score
                   best_seg = s
-
-              if extracted.get("id_in") is None and best_seg and best_score > float(GEOM_SEG_SCORE_MIN):
+              if best_seg and best_score > float(GEOM_SEG_SCORE_MIN):
                 candidate_id = best_seg.get("id_diameter")
-                # sanity: id < od
                 try:
                   od = float(extracted.get("od_in") or 0)
                 except Exception:
@@ -1841,34 +1825,34 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                   extracted["id_in"] = float(candidate_id)
                   cross = validation.get("cross_checks", []) or []
                   cross.append(
-                    f"id_in auto-filled from geometry segment (id_diameter={candidate_id} in, seg_conf={best_seg.get('confidence')})"
+                    f"id_in filled from geometry segment (LLM had no value): id_diameter={candidate_id} in, seg_conf={best_seg.get('confidence')}"
                   )
                   validation["cross_checks"] = cross
-            except Exception:
-              logger.debug("[Pipeline] geometry->id_in fill failed", exc_info=True)
+          except Exception:
+            logger.debug("[Pipeline] geometry->id_in fill failed", exc_info=True)
 
-            # --- best-effort finish extraction from raw PDF text if missing ---
-            try:
-              if not extracted.get("finish"):
-                # try broader finish patterns: explicit 'finish' labels, Ra values, or common keywords
-                m = _FINISH_RE_1.search(pdf_text)
-                if m:
-                  val = m.group(1).strip()
+          # --- best-effort finish extraction from raw PDF text if missing ---
+          try:
+            if not extracted.get("finish"):
+              # try broader finish patterns: explicit 'finish' labels, Ra values, or common keywords
+              m = _FINISH_RE_1.search(pdf_text)
+              if m:
+                val = m.group(1).strip()
+              else:
+                m2 = _FINISH_RE_RA.search(pdf_text)
+                if m2:
+                  val = m2.group(1).strip()
                 else:
-                  m2 = _FINISH_RE_RA.search(pdf_text)
-                  if m2:
-                    val = m2.group(1).strip()
-                  else:
-                    m3 = _FINISH_RE_KEYWORD.search(pdf_text)
-                    val = m3.group(1).strip() if m3 else None
+                  m3 = _FINISH_RE_KEYWORD.search(pdf_text)
+                  val = m3.group(1).strip() if m3 else None
 
-                if val:
-                  extracted["finish"] = val
-                  cross = validation.get("cross_checks", []) or []
-                  cross.append(f"finish auto-filled from PDF text: {val}")
-                  validation["cross_checks"] = cross
-            except Exception:
-              logger.debug("[Pipeline] finish auto-fill failed", exc_info=True)
+              if val:
+                extracted["finish"] = val
+                cross = validation.get("cross_checks", []) or []
+                cross.append(f"finish auto-filled from PDF text: {val}")
+                validation["cross_checks"] = cross
+          except Exception:
+            logger.debug("[Pipeline] finish auto-fill failed", exc_info=True)
         except Exception as exc:
           logger.warning("[Pipeline] Failed to read part_summary for geometry override (%s)", exc)
     except Exception:
