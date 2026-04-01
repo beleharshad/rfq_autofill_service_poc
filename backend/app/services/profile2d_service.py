@@ -11,14 +11,14 @@ import math
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from geometry_2d import Profile2D, LineSegment, Point2D, ArcSegment
+from app.geometry.geometry_2d import Profile2D, LineSegment, Point2D, ArcSegment
 try:
-    from revolved_solid_builder import RevolvedSolidBuilder
+    from app.geometry.revolved_solid_builder import RevolvedSolidBuilder
     _RSB_AVAILABLE = True
 except (ImportError, Exception):
     RevolvedSolidBuilder = None  # type: ignore[assignment,misc]
     _RSB_AVAILABLE = False
-from feature_extractor import FeatureExtractor, TurnedPartStack
+from app.geometry.feature_extractor import FeatureExtractor, TurnedPartStack
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.services.run_report_service import RunReportService

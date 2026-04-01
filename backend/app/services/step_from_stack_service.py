@@ -120,8 +120,8 @@ class StepFromStackService:
                 }
             
             # Build OCC solid
-            from revolved_solid_builder import RevolvedSolidBuilder, _STEP_EXPORT_AVAILABLE
-            from geometry_2d import Point2D
+            from app.geometry.revolved_solid_builder import RevolvedSolidBuilder, _STEP_EXPORT_AVAILABLE
+            from app.geometry.geometry_2d import Point2D
             
             logger.info(f"[StepFromStack] Building OCC solid from profile")
             logger.info(f"[StepFromStack] STEP export available: {_STEP_EXPORT_AVAILABLE}")

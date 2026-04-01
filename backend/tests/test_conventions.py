@@ -1,14 +1,9 @@
 """Unit tests for geometry conventions."""
 
 import pytest
-import sys
-from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from geometry_2d import Point2D
+# geometry modules are now proper package imports
+from app.geometry.geometry_2d import Point2D
 from app.geometry.conventions import (
     profile2d_to_3d_point,
     profile2d_to_3d_coords,

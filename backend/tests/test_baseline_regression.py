@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
-from geometry_2d import Profile2D, LineSegment, Point2D
+from app.geometry.geometry_2d import Profile2D, LineSegment, Point2D
 
 # Baseline dimensions from test_manual_pdf_profile.py
 L = 4.25

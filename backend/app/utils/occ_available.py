@@ -1,8 +1,6 @@
 """Utility to check if OCC (OpenCASCADE) is available."""
 
 import logging
-import sys
-from pathlib import Path
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -77,13 +75,8 @@ def _verify_revolved_solid_builder_import() -> None:
         ImportError: If RevolvedSolidBuilder cannot be imported
     """
     try:
-        # Add project root to path if needed
-        project_root = Path(__file__).parent.parent.parent.parent
-        if str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-        
         # Try to import RevolvedSolidBuilder
-        from revolved_solid_builder import RevolvedSolidBuilder
+        from app.geometry.revolved_solid_builder import RevolvedSolidBuilder
         logger.debug("RevolvedSolidBuilder import successful")
     except ImportError as e:
         error_msg = f"RevolvedSolidBuilder cannot be imported: {e}. OCC may be installed but not properly configured."

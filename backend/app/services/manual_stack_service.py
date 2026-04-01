@@ -10,10 +10,9 @@ from datetime import datetime, timezone
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from feature_extractor import TurnedPartStack, TurnedPartSegment
-from geometry_2d import Profile2D, LineSegment, Point2D
-from revolved_solid_builder import RevolvedSolidBuilder
-from feature_extractor import FeatureExtractor
+from app.geometry.feature_extractor import TurnedPartStack, TurnedPartSegment, FeatureExtractor
+from app.geometry.geometry_2d import Profile2D, LineSegment, Point2D
+from app.geometry.revolved_solid_builder import RevolvedSolidBuilder
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.models.job import JobStatus

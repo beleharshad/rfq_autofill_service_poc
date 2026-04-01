@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Dict, Tuple, Optional
-from geometry_2d import Profile2D, Point2D, LineSegment
+from app.geometry.geometry_2d import Profile2D, Point2D, LineSegment
 
 logger = logging.getLogger(__name__)
 

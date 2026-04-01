@@ -1,17 +1,11 @@
 """Pipeline service for running analysis."""
 
 import json
-import sys
 from pathlib import Path
 from typing import Dict, List
 from datetime import datetime, timezone
 
-# Add project root to path to import feature_extractor
-# From backend/app/services/ -> go up 3 levels to project root
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from feature_extractor import TurnedPartStack, TurnedPartSegment
+from app.geometry.feature_extractor import TurnedPartStack, TurnedPartSegment
 from app.storage.file_storage import FileStorage
 from app.services.job_service import JobService
 from app.services.run_report_service import RunReportService

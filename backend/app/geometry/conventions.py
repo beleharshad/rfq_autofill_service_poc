@@ -17,7 +17,7 @@ This ensures consistency across:
 
 from typing import Tuple
 from OCC.Core.gp import gp_Pnt, gp_Dir, gp_Ax1, gp_Ax2
-from geometry_2d import Point2D
+from app.geometry.geometry_2d import Point2D
 
 
 def profile2d_to_3d_point(profile_point: Point2D) -> gp_Pnt:
