@@ -9,6 +9,13 @@
   align-items: center;
   justify-content: center;
   min-height: calc(100vh - 200px);
+  gap: 4rem;
+}
+
+.home-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .home-description {
@@ -30,5 +37,42 @@
 
 .new-job-button:hover {
   background-color: #535bf2;
+}
+
+/* ── Contact / Demo section ───────────────────────────────── */
+.home-contact {
+  border-top: 1px solid #2a2a2a;
+  padding-top: 2.5rem;
+  width: 100%;
+  max-width: 480px;
+}
+
+.home-contact h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 0.75rem;
+}
+
+.home-contact p {
+  font-size: 0.95rem;
+  color: #888;
+  margin: 0 0 0.5rem;
+  line-height: 1.6;
+}
+
+.contact-email {
+  display: inline-block;
+  margin-top: 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #646cff;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.contact-email:hover {
+  color: #535bf2;
+  text-decoration: underline;
 }
 
