@@ -156,9 +156,12 @@ export const api = {
 
   /**
    * Get PDF file URL for viewing.
+   * Appends api_key as a query param so direct browser requests
+   * (<img src>, <a href>, window.open) are authenticated without headers.
    */
   getPdfUrl(jobId: string, filePath: string): string {
-    return `${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`;
+    const base = `${API_BASE_URL}/jobs/${jobId}/download?path=${encodeURIComponent(filePath)}`;
+    return _INTERNAL_API_KEY ? `${base}&api_key=${encodeURIComponent(_INTERNAL_API_KEY)}` : base;
   },
 
   /**
