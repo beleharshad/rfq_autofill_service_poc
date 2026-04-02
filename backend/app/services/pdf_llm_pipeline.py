@@ -996,6 +996,15 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
      f) If the title block / material note gives a stock size (e.g. N.NN DIA, BAR, TUBE,
        BLANK OD) and the finished profile shows a smaller OD with its own profile callout,
        the smaller profile OD is od_in and the title/material note value is max_od_in.
+  STEPPED-PART TRAP (very common error on flanged / capped / shouldered parts):
+    A stepped part has multiple OD sections — e.g. a body at Ø3.58" and a flange at Ø4.00".
+    od_in = the LARGEST of ALL finished profile OD callouts = Ø4.00" (the outer envelope).
+    The smaller step body OD (3.58") is NOT od_in — it is an interior step feature.
+    Do NOT assign the dominant/longer body OD to od_in when a larger flange or collar exists.
+    max_od_in is ONLY for raw stock from an RM/STOCK/MATERIAL note — NOT for the largest
+    finished profile OD. If you have no raw-stock note, max_od_in = null.
+    SELF-CHECK: after choosing od_in, scan the drawing once more — is there any profile
+    callout LARGER than your od_in candidate? If yes, that larger value is the true od_in.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -1140,7 +1149,12 @@ STEP 6 -- DETECT MACHINED FEATURES (only explicitly dimensioned features)
 STEP 7 -- SELF-VALIDATE and return the combined JSON.
   Check all of the following before returning:
   1. od_in > id_in (bore must fit inside part). Violation → REJECT.
-  2. max_od_in > od_in if present. Violation → REVIEW.
+  2. max_od_in > od_in if present: this is a RED FLAG.
+     max_od_in is raw STOCK OD — it should be larger than finish od_in only if
+     there is an explicit raw-stock note (RM table, material note with DIA/BAR/TUBE).
+     If max_od_in > od_in but you have NO raw-stock note to explain it, you have
+     likely put a larger finished profile OD into max_od_in by mistake.
+     Correct action: set od_in = max_od_in (the larger profile OD), set max_od_in = null.
   3. max_length_in >= length_in if present. Violation → REVIEW.
   4. ORIFICE CHECK: id_in / od_in < 0.10 for a non-solid part → LIKELY WRONG.
      You may have returned an orifice/port hole as id_in instead of the main bore.
@@ -1385,6 +1399,14 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
      f) Generic stock-note trap: if a title/material note gives a stock size (DIA / BAR / TUBE /
        BLANK OD) and the actual finished profile view shows a smaller OD with profile callouts,
        the profile OD is od_in and the stock note belongs to max_od_in.
+  STEPPED-PART TRAP (very common error on flanged / capped / shouldered parts):
+    A stepped part has multiple OD sections — e.g. a body at Ø3.58" and a flange at Ø4.00".
+    od_in = the LARGEST of ALL finished profile OD callouts = Ø4.00" (the outer envelope).
+    The smaller step body OD (3.58") is NOT od_in — it is an interior step feature.
+    max_od_in is ONLY for raw stock from an RM/STOCK/MATERIAL note — NOT for the largest
+    finished profile OD. If there is no raw-stock note, max_od_in = null.
+    SELF-CHECK: after choosing od_in, scan once more — is there any profile callout LARGER
+    than your od_in candidate? If yes, that larger value is the true od_in.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -2013,6 +2035,49 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                 validation["cross_checks"] = cross
           except Exception:
             logger.debug("[Pipeline] stock-DIA -> od_in correction failed", exc_info=True)
+
+          # Deterministic correction: LLM assigned a smaller step OD to od_in but put
+          # the true (larger) profile envelope OD into max_od_in.
+          # Pattern: max_od_in > od_in with no raw-stock evidence in material string.
+          # This requires NO geometry — operates on LLM self-reported values only.
+          try:
+            _llm_od2 = extracted.get("od_in")
+            _llm_max_od2 = extracted.get("max_od_in")
+            _mat2 = str(extracted.get("material") or "").upper()
+            if _llm_od2 and _llm_max_od2:
+              _llm_od2_f = float(_llm_od2)
+              _llm_max_od2_f = float(_llm_max_od2)
+              if (_llm_max_od2_f - _llm_od2_f) > 0.02:
+                # Check if max_od_in is explained by a raw-stock note.
+                _raw_stock_patterns = [
+                  r'\d+(?:\.\d+)?\s*DIA\b',  # e.g. "4.00 DIA"
+                  r'\bBAR\b', r'\bROUND\b', r'\bTUBE\b', r'\bBLANK\b',
+                  r'\bSTOCK\b', r'\bCUTOFF\b', r'\bBILLET\b',
+                ]
+                _has_stock_note = any(re.search(p, _mat2) for p in _raw_stock_patterns)
+                # Also check if LLM's own max_od validation issue mentions stock/raw.
+                _max_od_issue = str(
+                  ((validation.get("fields") or {}).get("max_od_in") or {}).get("issue") or ""
+                ).lower()
+                _issue_says_stock = any(
+                  w in _max_od_issue for w in ("stock", "raw", "material", "rm ", " rm", "bar", "billet")
+                )
+                if not _has_stock_note and not _issue_says_stock:
+                  extracted["od_in"] = _llm_max_od2_f
+                  extracted["max_od_in"] = None
+                  cross = validation.get("cross_checks", []) or []
+                  cross.append(
+                    f"od_in corrected: LLM assigned smaller step OD ({_llm_od2_f}) to od_in "
+                    f"but max_od_in ({_llm_max_od2_f}) is the true profile envelope OD "
+                    f"(no raw-stock note in material). od_in → {_llm_max_od2_f}, max_od_in → null."
+                  )
+                  validation["cross_checks"] = cross
+                  logger.info(
+                    "[Pipeline] step-OD correction: od_in %.3f → %.3f (max_od was profile OD, no stock note)",
+                    _llm_od2_f, _llm_max_od2_f,
+                  )
+          except Exception:
+            logger.debug("[Pipeline] step-OD -> od_in correction failed", exc_info=True)
 
           # Only fill length from geometry when LLM did NOT extract one.
           # Never override a value the LLM already found — geometry scale is unreliable.
