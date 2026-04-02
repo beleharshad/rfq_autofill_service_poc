@@ -123,6 +123,14 @@ Before reading any number off the drawing, identify what kind of part you are lo
     also remains at that exact diameter. Do NOT copy the stock/material diameter into
     od_in just because it is the largest diameter-like number in the title block.
 
+  GENERIC PROFILE-vs-STOCK RULE:
+    Finished dimensions come from the FINISHED PART PROFILE / SECTION VIEW.
+    Stock dimensions come from material notes, title blocks, RM tables, or purchase notes.
+    If a title/material note gives a diameter and the drawing profile shows a smaller finished
+    diameter with its own tolerance/callout, use the smaller profile value as od_in and the
+    title/material note value as max_od_in.
+    Rule of precedence: finished profile callout > section/profile geometry > title/material note.
+
 
 === FUNDAMENTAL CONCEPT: WHAT EACH FIELD MEANS ===
 
@@ -210,7 +218,7 @@ length_in  (Finish Length / OAL):
       or silhouette estimate (0.60 confidence) for `length_in` and annotate the source.
     SYMMETRY / HALF-VIEW TRAP:
       Some drawings dimension only from the CENTERLINE or mid-plane to one face on a
-      symmetric part (end cap, flange, plug, spool, etc.). That centerline-to-face distance
+      symmetric part (cap, flange, hub, spacer, plug, ring, collar, spool, etc.). That centerline-to-face distance
       is HALF the overall length. If the profile is mirrored about a vertical center plane
       and you only see 1.44 or 1.45 from centerline to one end, OAL is about 2.88 or 2.90,
       not 1.45. Always determine whether an axial dimension is full-face-to-face or only
@@ -933,7 +941,9 @@ For the validation:
 - ACCEPT  : od_in is the largest part-profile diameter, id_in < od_in, length_in is
             overall length, confidence >= 0.85 for all three, no logical violations.
 - REVIEW  : any priority dim has confidence 0.60-0.84, minor ambiguity, or RM dims
-            (max_od_in, max_length_in) could not be confirmed.
+            (max_od_in, max_length_in) could not be confirmed, or there is any sign that
+            a title/material stock note may have been used as a finish dimension, or a
+            centerline-to-face half-dimension may have been used as full OAL.
 - REJECT  : od_in <= id_in, any dim is zero/negative, or a clear extraction error
             cannot be corrected from available text.
 
@@ -974,6 +984,9 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
        LARGEST value is od_in.
     e) Raw/RM dimensions appear in a SEPARATE table or notes block --
        do NOT use those as od_in.
+     f) If the title block / material note gives a stock size (e.g. N.NN DIA, BAR, TUBE,
+       BLANK OD) and the finished profile shows a smaller OD with its own profile callout,
+       the smaller profile OD is od_in and the title/material note value is max_od_in.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -1051,6 +1064,7 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
     ✗ RM / cutoff length from the stock table — that is max_length_in, always > length_in.
     ✗ A diameter callout (Phi numbers) — length is measured along the axis, not width.
     ✗ Centerline-to-face half-dimension on a symmetric part — double it to get full OAL.
+    ✗ Title-block or material-note stock dimension mistaken for a finished profile dimension.
 
   EXTRACTION PROTOCOL:
   a) PRIMARY — find the SINGLE dimension witness line spanning the FULL axial extent:
@@ -1351,6 +1365,9 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
        LESS than od_in unless they define the outermost extent.
     e) Raw/RM dimensions appear in a SEPARATE table or notes block away
        from the part profile -- do NOT use those as od_in.
+     f) Generic stock-note trap: if a title/material note gives a stock size (DIA / BAR / TUBE /
+       BLANK OD) and the actual finished profile view shows a smaller OD with profile callouts,
+       the profile OD is od_in and the stock note belongs to max_od_in.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -1391,8 +1408,8 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
     c) PRIMARY: look for a SINGLE dimension spanning from one end-face to the other (OAL).
        If found — STOP. Do NOT add partial step dimensions to it. Any step dimension that
        starts from the same end-face is a sub-section WITHIN this OAL, not extra length.
-       If the view is symmetric and the shown dimension runs only from the centerline to one
-       end-face, DOUBLE it to recover the full OAL.
+       If the view is symmetric and the shown dimension runs only from the centerline or
+       mid-plane to one end-face, DOUBLE it to recover the full OAL.
        SEGMENT OVERLAP TRAP (most common chain-sum error on stepped parts):
          If you see two axial dimensions that both anchor from the SAME end-face (e.g.,
          2.63\" and 4.13\" both measured from the left face), the larger one (4.13\") already
