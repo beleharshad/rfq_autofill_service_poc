@@ -1935,26 +1935,38 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
           # but geometry profile shows true finish OD near 3.000.
           try:
             _material = str(extracted.get("material") or "").upper()
+            _name = str(extracted.get("part_name") or "").upper()
+            _tol_od = str(extracted.get("tolerance_od") or "")
             _llm_od = extracted.get("od_in")
             _llm_max_od = extracted.get("max_od_in")
             _stock_match = re.search(r'(\d+(?:\.\d+)?)\s*DIA\b', _material)
             _stock_dia = float(_stock_match.group(1)) if _stock_match else None
             _geom_conf = float(geom_conf or 0)
-            if _geom_conf >= 0.85 and geom_max_od and _llm_od:
+            if _geom_conf >= 0.75 and geom_max_od and _llm_od:
               _llm_od_f = float(_llm_od)
               _llm_max_od_f = float(_llm_max_od or 0)
               _geom_od_f = float(geom_max_od)
               _near_stock = (_stock_dia is not None and abs(_llm_od_f - _stock_dia) <= 0.02) or (
                 _llm_max_od_f > 0 and abs(_llm_od_f - _llm_max_od_f) <= 0.02
               )
-              _geom_smaller = _geom_od_f > 0 and (_llm_od_f - _geom_od_f) >= 0.05
-              if _near_stock and _geom_smaller:
+              _cap_like = any(tok in _name for tok in ("END CAP", "CAP", "PLUG", "FLANGE", "SPOOL"))
+              _bar_like = "BAR" in _material or "COLD DRAWN" in _material or "CRS" in _material
+              _tol_near_llm = False
+              _m_tol = re.search(r'(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)', _tol_od)
+              if _m_tol:
+                try:
+                  _tol_hi = max(float(_m_tol.group(1)), float(_m_tol.group(2)))
+                  _tol_near_llm = abs(_tol_hi - _llm_od_f) <= 0.01
+                except Exception:
+                  _tol_near_llm = False
+              _geom_smaller = _geom_od_f > 0 and (_llm_od_f - _geom_od_f) >= 0.20
+              if (_near_stock or (_cap_like and _bar_like and _tol_near_llm)) and _geom_smaller:
                 extracted["od_in"] = _geom_od_f
                 if _stock_dia is not None and (_llm_max_od_f <= 0 or abs(_llm_max_od_f - _stock_dia) > 0.02):
                   extracted["max_od_in"] = _stock_dia
                 cross = validation.get("cross_checks", []) or []
                 cross.append(
-                  f"od_in corrected from geometry/profile because LLM matched raw stock DIA in material/title: "
+                  f"od_in corrected from geometry/profile because LLM likely matched raw stock / title-block OD instead of finish profile: "
                   f"finish_od={_geom_od_f} in, raw_stock_od={float(extracted.get('max_od_in') or _llm_max_od_f or 0):.3f} in, geom_conf={_geom_conf:.2f}"
                 )
                 validation["cross_checks"] = cross
