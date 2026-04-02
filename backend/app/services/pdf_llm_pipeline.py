@@ -2107,15 +2107,22 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                   _tol_near_llm = False
               _geom_smaller = _geom_od_f > 0 and (_llm_od_f - _geom_od_f) >= 0.20
               if (_near_stock or (_cap_like and _bar_like and _tol_near_llm)) and _geom_smaller:
-                extracted["od_in"] = _geom_od_f
-                if _stock_dia is not None and (_llm_max_od_f <= 0 or abs(_llm_max_od_f - _stock_dia) > 0.02):
-                  extracted["max_od_in"] = _stock_dia
+                # LLM is authoritative for od_in — do NOT override it with geometry.
+                # Flag as REVIEW so the human can verify; geometry will be calibrated
+                # to match LLM od_in when the 3D model is rendered.
                 cross = validation.get("cross_checks", []) or []
                 cross.append(
-                  f"od_in corrected from geometry/profile because LLM likely matched raw stock / title-block OD instead of finish profile: "
-                  f"finish_od={_geom_od_f} in, raw_stock_od={float(extracted.get('max_od_in') or _llm_max_od_f or 0):.3f} in, geom_conf={_geom_conf:.2f}"
+                  f"od_in={_llm_od_f:.3f} in may be raw stock OD (geometry profile suggests "
+                  f"finish_od≈{_geom_od_f:.3f} in, geom_conf={_geom_conf:.2f}). "
+                  f"Verify finish OD on profile view — 3D geometry will be calibrated to LLM od_in."
                 )
                 validation["cross_checks"] = cross
+                validation["recommendation"] = "REVIEW"
+                validation["overall_confidence"] = min(float(validation.get("overall_confidence") or 1.0), 0.45)
+                logger.info(
+                  "[Pipeline] stock-OD mismatch flagged (NOT overriding): llm_od=%.3f geom_od=%.3f",
+                  _llm_od_f, _geom_od_f,
+                )
           except Exception:
             logger.debug("[Pipeline] stock-DIA -> od_in correction failed", exc_info=True)
 
@@ -2180,6 +2187,9 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
 
           # Narrow corrective override for another common LLM failure:
           # centerline-to-face half-length returned as full OAL on symmetric parts.
+          # GUARD: Only apply if geometry OD is consistent with LLM OD (ratio ~1.0).
+          # If geom_max_od ≈ 2× llm_od, the geometry scale is doubled (bad anchor),
+          # not the LLM reading a half-length — so skip the override.
           try:
             _llm_len = extracted.get("length_in")
             _name = str(extracted.get("part_name") or "").upper()
@@ -2189,14 +2199,37 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
               _geom_len_f = float(geom_len)
               _is_half = abs(_geom_len_f - (2.0 * _llm_len_f)) <= max(0.06, 0.03 * _geom_len_f)
               _symmetric_name = any(tok in _name for tok in ("CAP", "END CAP", "FLANGE", "PLUG", "SPOOL"))
-              if _is_half and (_symmetric_name or _geom_len_f > _llm_len_f * 1.9):
-                extracted["length_in"] = _geom_len_f
+              # OD consistency guard: if geom_max_od is ~2× llm od_in then geometry
+              # scale is uniformly doubled (wrong anchor dimension was used) — the LLM
+              # value is correct and geometry-based override must be suppressed.
+              _geom_od_consistent = True
+              _llm_od_for_guard = extracted.get("od_in")
+              if geom_max_od and _llm_od_for_guard:
+                try:
+                  _llm_od_guard_f = float(_llm_od_for_guard)
+                  _geom_od_guard_f = float(geom_max_od)
+                  if _llm_od_guard_f > 0 and _geom_od_guard_f > 0:
+                    _od_ratio = _geom_od_guard_f / _llm_od_guard_f
+                    if 1.7 <= _od_ratio <= 2.3:
+                      _geom_od_consistent = False
+                      logger.debug(
+                        f"[Pipeline] half-length override suppressed: geom_max_od={_geom_od_guard_f:.4f} "
+                        f"is ~{_od_ratio:.2f}× llm_od={_llm_od_guard_f:.4f} — geometry scale appears doubled"
+                      )
+                except (TypeError, ValueError):
+                  pass
+              if _is_half and _geom_od_consistent and (_symmetric_name or _geom_len_f > _llm_len_f * 1.9):
+                # LLM is authoritative for length_in — do NOT override it with geometry.
+                # Flag as REVIEW so the human can verify if LLM used centerline-to-face half-length.
+                # The 3D geometry will be calibrated to match LLM length_in when rendered.
                 cross = validation.get("cross_checks", []) or []
                 cross.append(
-                  f"length_in corrected from geometry/profile because LLM appears to have used centerline-to-face half-length: "
-                  f"oal={_geom_len_f} in vs llm_half_length={_llm_len_f} in, geom_conf={_geom_conf:.2f}"
+                  f"length_in={_llm_len_f:.3f} in may be centerline-to-face half-length "
+                  f"(geometry profile total={_geom_len_f:.3f} in ≈ 2×, geom_conf={_geom_conf:.2f}). "
+                  f"Verify OAL on drawing — 3D geometry will be calibrated to LLM length."
                 )
                 validation["cross_checks"] = cross
+                validation["recommendation"] = "REVIEW"
           except Exception:
             logger.debug("[Pipeline] half-length -> OAL correction failed", exc_info=True)
 

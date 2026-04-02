@@ -142,6 +142,40 @@ async def analyze_job_pdf(job_id: str):
     outputs_path.mkdir(parents=True, exist_ok=True)
     (outputs_path / _RESULT_FILENAME).write_text(json.dumps(result, indent=2), encoding="utf-8")
 
+    # Update part_summary.json totals to match LLM-extracted dimensions so that the
+    # displayed totals and future 3D calibration are always anchored to LLM values.
+    # Also invalidate any cached STEP/GLB so the next 3d-preview call regenerates
+    # with LLM-calibrated geometry.
+    try:
+        ps_file = outputs_path / "part_summary.json"
+        if ps_file.exists():
+            ps = json.loads(ps_file.read_text(encoding="utf-8"))
+            llm_extracted = result.get("extracted") or {}
+            llm_od  = llm_extracted.get("od_in")
+            llm_len = llm_extracted.get("length_in")
+            llm_id  = llm_extracted.get("id_in")
+            if ps.get("totals") and (llm_od or llm_len):
+                if llm_len and float(llm_len) > 0:
+                    ps["totals"]["total_length_in"] = float(llm_len)
+                if llm_od and float(llm_od) > 0:
+                    ps["totals"]["max_od_in"] = float(llm_od)
+                if llm_id and float(llm_id) > 0:
+                    ps["totals"]["max_id_in"] = float(llm_id)
+                ps.setdefault("llm_calibrated", {})
+                ps["llm_calibrated"] = {
+                    "od_in":    llm_od,
+                    "length_in": llm_len,
+                    "id_in":    llm_id,
+                }
+                ps_file.write_text(json.dumps(ps, indent=2), encoding="utf-8")
+        # Invalidate cached STEP/GLB so 3d-preview regenerates with LLM calibration
+        for _stale in ("model.step", "model.glb"):
+            _sp = outputs_path / _stale
+            if _sp.exists():
+                _sp.unlink(missing_ok=True)
+    except Exception:
+        pass  # non-fatal — do not block response
+
     return result
 
 

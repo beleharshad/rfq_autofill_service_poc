@@ -92,6 +92,54 @@ class StepFromStackService:
                     }
                 }
 
+            # --- LLM-based geometry calibration ---
+            # Scale all segment dimensions so the 3D model matches the LLM-extracted
+            # od_in and length_in values (LLM is the authoritative source for dimensions).
+            try:
+                llm_analysis_file = outputs_path / "llm_analysis.json"
+                if llm_analysis_file.exists():
+                    llm_data = json.loads(llm_analysis_file.read_text(encoding="utf-8"))
+                    llm_od = llm_data.get("extracted", {}).get("od_in")
+                    llm_len = llm_data.get("extracted", {}).get("length_in")
+                    if llm_od and llm_len and float(llm_od) > 0 and float(llm_len) > 0:
+                        geom_max_od = max((float(s.get("od_diameter") or 0) for s in segments), default=0.0)
+                        z_vals = (
+                            [float(s.get("z_start") or 0) for s in segments]
+                            + [float(s.get("z_end") or 0) for s in segments]
+                        )
+                        geom_total_len = (max(z_vals) - min(z_vals)) if z_vals else 0.0
+                        if geom_max_od > 0 and geom_total_len > 0:
+                            xy_scale = float(llm_od) / geom_max_od
+                            z_min = min(z_vals)
+                            z_scale = float(llm_len) / geom_total_len
+                            calibrated = []
+                            for s in segments:
+                                ns = dict(s)
+                                z0 = float(s.get("z_start") or 0)
+                                z1 = float(s.get("z_end") or 0)
+                                ns["z_start"] = round((z0 - z_min) * z_scale, 6)
+                                ns["z_end"]   = round((z1 - z_min) * z_scale, 6)
+                                ns["od_diameter"] = round(float(s.get("od_diameter") or 0) * xy_scale, 6)
+                                if s.get("id_diameter") and float(s["id_diameter"]) > 0:
+                                    ns["id_diameter"] = round(float(s["id_diameter"]) * xy_scale, 6)
+                                if s.get("wall_thickness") and float(s.get("wall_thickness") or 0) > 0:
+                                    ns["wall_thickness"] = round(float(s["wall_thickness"]) * xy_scale, 6)
+                                calibrated.append(ns)
+                            segments = calibrated
+                            logger.info(
+                                "[StepFromStack] LLM calibration: xy_scale=%.4f "
+                                "(llm_od=%.4f / geom_od=%.4f), z_scale=%.4f "
+                                "(llm_len=%.4f / geom_len=%.4f)",
+                                xy_scale, float(llm_od), geom_max_od,
+                                z_scale, float(llm_len), geom_total_len,
+                            )
+                        else:
+                            logger.info("[StepFromStack] LLM calibration skipped: zero geometry dimensions")
+                    else:
+                        logger.info("[StepFromStack] LLM calibration skipped: LLM od_in or length_in not available")
+            except Exception as _llm_cal_err:
+                logger.debug("[StepFromStack] LLM-based calibration failed (non-fatal): %s", _llm_cal_err)
+
             # Apply bore diameter override — when the LLM knows the real ID but the
             # inferred_stack has id_diameter≈0 for most segments, this propagates the
             # correct bore so the solid is rendered hollow.

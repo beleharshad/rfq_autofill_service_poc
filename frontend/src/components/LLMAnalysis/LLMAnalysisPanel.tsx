@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
-import type { LLMAnalysisResult, LLMExtractedSpecs } from '../../services/types';
+import type { LLMAnalysisResult, LLMExtractedSpecs, CorrectionsMap } from '../../services/types';
 import './LLMAnalysisPanel.css';
 
 interface Props {
   jobId: string;
+  /** Called whenever a correction is saved, so parent components can refresh. */
+  onCorrectionsChange?: (corrections: CorrectionsMap) => void;
 }
 
 const SPEC_LABELS: { key: keyof LLMExtractedSpecs; label: string; unit?: string; group?: string }[] = [
@@ -36,13 +38,23 @@ function confidenceColor(conf: number | undefined): string {
   return 'conf-low';
 }
 
-export default function LLMAnalysisPanel({ jobId }: Props) {
+/** Fields that support numeric inline editing (pencil icon). */
+const EDITABLE_NUMERIC_KEYS = new Set([
+  'od_in', 'max_od_in', 'id_in', 'max_id_in', 'length_in', 'max_length_in', 'quantity',
+]);
+
+export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) {
   const [result, setResult] = useState<LLMAnalysisResult | null>(null);
-  const [partSummary, setPartSummary] = useState<any | null>(null);
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoLoaded, setAutoLoaded] = useState(false);
+
+  // Correction state
+  const [corrections, setCorrections] = useState<CorrectionsMap>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-load cached analysis produced by the infer-stack pipeline
   useEffect(() => {
@@ -55,10 +67,17 @@ export default function LLMAnalysisPanel({ jobId }: Props) {
         }
       })
       .catch(() => { /* network error — ignore on mount */ });
-    // Also load part_summary (geometry-derived values) so we can prefer them when reliable
-    api.getPartSummary(jobId).then(ps => setPartSummary(ps)).catch(() => {});
+    // Load any previously-saved corrections
+    api.getCorrections(jobId).then(corrs => {
+      if (!cancelled) setCorrections(corrs);
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [jobId]);
+
+  // Focus the inline edit input whenever it appears
+  useEffect(() => {
+    if (editingKey) editInputRef.current?.focus();
+  }, [editingKey]);
 
   const runAnalysis = useCallback(async () => {
     setRunning(true);
@@ -106,6 +125,35 @@ export default function LLMAnalysisPanel({ jobId }: Props) {
       setExporting(false);
     }
   }, [jobId]);
+
+  const handleStartEdit = useCallback((key: string, currentDisplayVal: any) => {
+    setEditingKey(key);
+    // Pre-populate with corrected value if present, otherwise LLM value
+    const current = corrections[key]?.value ?? currentDisplayVal;
+    setEditValue(current != null ? String(current) : '');
+  }, [corrections]);
+
+  const handleSaveEdit = useCallback(async (key: keyof LLMExtractedSpecs) => {
+    const trimmed = editValue.trim();
+    setEditingKey(null);
+    if (trimmed === '') return; // empty — discard
+
+    const parsed = EDITABLE_NUMERIC_KEYS.has(key) ? parseFloat(trimmed) : trimmed;
+    if (EDITABLE_NUMERIC_KEYS.has(key) && isNaN(parsed as number)) return; // invalid number
+
+    const originalValue = result?.extracted?.[key] ?? null;
+    try {
+      await api.saveCorrection(jobId, key, parsed as number | string, originalValue as string | number | null);
+      const updated: CorrectionsMap = {
+        ...corrections,
+        [key]: { field: key, value: parsed as number | string, original_value: originalValue as string | number | null, corrected_at: new Date().toISOString() },
+      };
+      setCorrections(updated);
+      onCorrectionsChange?.(updated);
+    } catch {
+      setError('Failed to save correction — please try again.');
+    }
+  }, [editValue, corrections, jobId, result, onCorrectionsChange]);
 
   const rec = result?.validation?.recommendation;
   const recClass =
@@ -194,22 +242,23 @@ export default function LLMAnalysisPanel({ jobId }: Props) {
               </thead>
               <tbody>
                 {SPEC_LABELS.map(({ key, label, unit, group }, idx) => {
-                  // Determine displayed value: prefer geometry-derived length when available and reliable
+                  // Determine displayed value: corrections → geometry-derived → LLM
                   const llmVal = result.extracted?.[key];
+                  const correction = corrections[key];
                   const vinfo = result.validation?.fields?.[key];
                   const conf = vinfo?.confidence;
                   const issue = vinfo?.issue;
                   let displayVal: any = llmVal;
                   let displaySource = 'LLM';
-                  if (key === 'length_in' && partSummary) {
-                    // geometry confidence from inference_metadata or scale_report
-                    const geomConf = partSummary.inference_metadata?.overall_confidence ?? partSummary.scale_report?.confidence ?? 0;
-                    const scaleValid = partSummary.scale_report?.validation_passed ?? false;
-                    if (geomConf >= 0.8 || scaleValid) {
-                      displayVal = partSummary.totals?.total_length_in ?? displayVal;
-                      displaySource = 'Geometry';
-                    }
+                  // Corrections override everything
+                  const isCorrected = correction != null && correction.value != null;
+                  if (isCorrected) {
+                    displayVal = correction!.value;
+                    displaySource = 'Corrected';
                   }
+                  const isEditable = EDITABLE_NUMERIC_KEYS.has(key);
+                  const isEditing = editingKey === key;
+
                   // group separator row
                   const prevGroup = idx > 0 ? SPEC_LABELS[idx - 1].group : null;
                   const showGroupHeader = group && group !== prevGroup;
@@ -220,13 +269,38 @@ export default function LLMAnalysisPanel({ jobId }: Props) {
                           <td colSpan={4} className="group-header-cell">{group} Dimensions</td>
                         </tr>
                       )}
-                      <tr key={key} className={issue ? 'row-issue' : ''}>
+                      <tr key={key} className={[issue ? 'row-issue' : '', isCorrected ? 'row-corrected' : ''].filter(Boolean).join(' ')}>
                         <td className="field-label">{label}</td>
-                        <td>
-                          {displayVal !== null && displayVal !== undefined
-                            ? `${displayVal}${unit ? ' ' + unit : ''} `
-                            : <span className="null-val">—</span>}
-                          {displaySource && <span className="source-badge">{displaySource}</span>}
+                        <td className="value-cell">
+                          {isEditing ? (
+                            <input
+                              ref={editInputRef}
+                              className="dim-edit-input"
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onBlur={() => handleSaveEdit(key)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSaveEdit(key);
+                                if (e.key === 'Escape') { setEditingKey(null); }
+                              }}
+                            />
+                          ) : (
+                            <>
+                              {displayVal !== null && displayVal !== undefined
+                                ? `${displayVal}${unit ? ' ' + unit : ''} `
+                                : <span className="null-val">—</span>}
+                              {isCorrected
+                                ? <span className="badge-corrected">✏ Corrected</span>
+                                : displaySource && <span className="source-badge">{displaySource}</span>}
+                              {isEditable && !isEditing && (
+                                <button
+                                  className="edit-pencil"
+                                  title="Edit value"
+                                  onClick={() => handleStartEdit(key, displayVal)}
+                                >✏</button>
+                              )}
+                            </>
+                          )}
                         </td>
                         <td className={confidenceColor(conf)}>
                           {conf !== undefined ? `${Math.round(conf * 100)}%` : '—'}
