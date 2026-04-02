@@ -111,6 +111,35 @@ def _run_llm_background(pdf_path: Path, outputs_path: Path, job_id: str = "") ->
         outputs_path.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(llm_result, indent=2), encoding="utf-8")
         print(f"[LLM-BG] Pipeline done — valid={llm_result.get('valid')}")
+        # Sync part_summary.json totals to LLM-extracted dimensions so RFQ autofill
+        # and 3D preview calibration are always anchored to the authoritative LLM values.
+        # Also invalidate any cached STEP/GLB so the next 3d-preview regenerates correctly.
+        try:
+            ps_file = outputs_path / "part_summary.json"
+            if ps_file.exists():
+                import json as _json
+                ps = _json.loads(ps_file.read_text(encoding="utf-8"))
+                llm_ext = llm_result.get("extracted") or {}
+                llm_od  = llm_ext.get("od_in")
+                llm_len = llm_ext.get("length_in")
+                llm_id  = llm_ext.get("id_in")
+                if ps.get("totals") and (llm_od or llm_len):
+                    if llm_len and float(llm_len) > 0:
+                        ps["totals"]["total_length_in"] = float(llm_len)
+                    if llm_od and float(llm_od) > 0:
+                        ps["totals"]["max_od_in"] = float(llm_od)
+                    if llm_id and float(llm_id) > 0:
+                        ps["totals"]["max_id_in"] = float(llm_id)
+                    ps["llm_calibrated"] = {
+                        "od_in": llm_od, "length_in": llm_len, "id_in": llm_id,
+                    }
+                    ps_file.write_text(_json.dumps(ps, indent=2), encoding="utf-8")
+            for _stale in ("model.step", "model.glb"):
+                _sp = outputs_path / _stale
+                if _sp.exists():
+                    _sp.unlink(missing_ok=True)
+        except Exception as _sync_err:
+            print(f"[LLM-BG] part_summary sync failed (non-fatal): {_sync_err}")
     except Exception as exc:
         print(f"[LLM-BG] Pipeline failed: {exc}")
         stub = _error_stub_from_exc(exc)

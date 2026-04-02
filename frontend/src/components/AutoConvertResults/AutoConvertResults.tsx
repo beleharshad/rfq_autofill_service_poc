@@ -576,9 +576,7 @@ function AutoConvertResults({
   // apply a uniform ratio so the 3-D model matches the real part size.
   const llmOdIn: number = ed.od_in ?? 0;
   const latheSegsNorm: Segment[] = useMemo(() => {
-    // If geometry is high-confidence, prefer geometry segments as-is (no LLM scaling)
-    const geomHigh = (partSummary?.inference_metadata?.overall_confidence ?? partSummary?.scale_report?.confidence) >= 0.8;
-    if (geomHigh) return latheSegs;
+    // Always scale segments to LLM od_in — LLM is the authoritative source for dimensions.
     if (!llmOdIn || llmOdIn <= 0 || latheSegs.length === 0) return latheSegs;
     const maxSegOd = Math.max(...latheSegs.map((s) => s.od_diameter));
     if (!maxSegOd || maxSegOd <= 0) return latheSegs;
