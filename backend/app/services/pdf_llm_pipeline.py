@@ -1914,10 +1914,52 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
           if geom_conf is None:
             geom_conf = ps.get("scale_report", {}).get("confidence", 0)
           geom_len = None
+          geom_max_od = None
           try:
             geom_len = ps.get("totals", {}).get("total_length_in")
           except Exception:
             geom_len = None
+          try:
+            geom_max_od = ps.get("totals", {}).get("max_od_in")
+            if not geom_max_od:
+              for _seg in ps.get("segments", []) or []:
+                _od = _seg.get("od_diameter")
+                if _od:
+                  geom_max_od = max(float(geom_max_od or 0), float(_od))
+          except Exception:
+            geom_max_od = None
+
+          # Narrow corrective override for a common LLM failure:
+          # material/title stock DIA copied into finish OD.
+          # Example: material="4.00 DIA 1018 CRS", LLM od_in=3.996, max_od_in=4.0,
+          # but geometry profile shows true finish OD near 3.000.
+          try:
+            _material = str(extracted.get("material") or "").upper()
+            _llm_od = extracted.get("od_in")
+            _llm_max_od = extracted.get("max_od_in")
+            _stock_match = re.search(r'(\d+(?:\.\d+)?)\s*DIA\b', _material)
+            _stock_dia = float(_stock_match.group(1)) if _stock_match else None
+            _geom_conf = float(geom_conf or 0)
+            if _geom_conf >= 0.85 and geom_max_od and _llm_od:
+              _llm_od_f = float(_llm_od)
+              _llm_max_od_f = float(_llm_max_od or 0)
+              _geom_od_f = float(geom_max_od)
+              _near_stock = (_stock_dia is not None and abs(_llm_od_f - _stock_dia) <= 0.02) or (
+                _llm_max_od_f > 0 and abs(_llm_od_f - _llm_max_od_f) <= 0.02
+              )
+              _geom_smaller = _geom_od_f > 0 and (_llm_od_f - _geom_od_f) >= 0.05
+              if _near_stock and _geom_smaller:
+                extracted["od_in"] = _geom_od_f
+                if _stock_dia is not None and (_llm_max_od_f <= 0 or abs(_llm_max_od_f - _stock_dia) > 0.02):
+                  extracted["max_od_in"] = _stock_dia
+                cross = validation.get("cross_checks", []) or []
+                cross.append(
+                  f"od_in corrected from geometry/profile because LLM matched raw stock DIA in material/title: "
+                  f"finish_od={_geom_od_f} in, raw_stock_od={float(extracted.get('max_od_in') or _llm_max_od_f or 0):.3f} in, geom_conf={_geom_conf:.2f}"
+                )
+                validation["cross_checks"] = cross
+          except Exception:
+            logger.debug("[Pipeline] stock-DIA -> od_in correction failed", exc_info=True)
 
           # Only fill length from geometry when LLM did NOT extract one.
           # Never override a value the LLM already found — geometry scale is unreliable.
@@ -1934,6 +1976,28 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
               f"length_in filled from geometry (LLM had no value): {geom_len} in, geom_conf={float(geom_conf or 0):.2f}"
             )
             validation["cross_checks"] = cross
+
+          # Narrow corrective override for another common LLM failure:
+          # centerline-to-face half-length returned as full OAL on symmetric parts.
+          try:
+            _llm_len = extracted.get("length_in")
+            _name = str(extracted.get("part_name") or "").upper()
+            _geom_conf = float(geom_conf or 0)
+            if geom_len and _llm_len and _geom_conf >= 0.85:
+              _llm_len_f = float(_llm_len)
+              _geom_len_f = float(geom_len)
+              _is_half = abs(_geom_len_f - (2.0 * _llm_len_f)) <= max(0.06, 0.03 * _geom_len_f)
+              _symmetric_name = any(tok in _name for tok in ("CAP", "END CAP", "FLANGE", "PLUG", "SPOOL"))
+              if _is_half and (_symmetric_name or _geom_len_f > _llm_len_f * 1.9):
+                extracted["length_in"] = _geom_len_f
+                cross = validation.get("cross_checks", []) or []
+                cross.append(
+                  f"length_in corrected from geometry/profile because LLM appears to have used centerline-to-face half-length: "
+                  f"oal={_geom_len_f} in vs llm_half_length={_llm_len_f} in, geom_conf={_geom_conf:.2f}"
+                )
+                validation["cross_checks"] = cross
+          except Exception:
+            logger.debug("[Pipeline] half-length -> OAL correction failed", exc_info=True)
 
           # Only fill id_in from geometry when LLM did NOT extract one.
           try:
