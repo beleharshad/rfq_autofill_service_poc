@@ -393,6 +393,15 @@ Step 9 — COMMON ERRORS TO AVOID:
   BLIND BORE CHECK: if the part has a blind bore (closed at one end, like a cup or piston),
     the OAL = bore depth + bottom wall thickness. Verify the OAL dimension is the
     FULL end-to-end span, not just the bore depth.
+  BORE DEPTH CHAIN-IN TRAP (very common error on capped/bored parts):
+    A bore/ID depth measured INWARD from an end-face is NOT an OD axial step that
+    extends BEYOND that face. Do NOT add a bore depth to the OAL chain sum.
+    If your chain sum is: (OD steps) + (bore depth) = total, the bore depth term is
+    an interior dimension — the OAL = the OD steps alone.
+    Example: OD stepped profile spans 4.13"; bore 0.88" dia is 0.75" deep from the right face.
+    OAL = 4.13", NOT 4.13 + 0.75 = 4.88". The bore lives INSIDE the 4.13" envelope.
+    Quick check: if removing the last chain-sum term gives a value that matches an
+    explicit dimension callout on the drawing, that shorter value is the true OAL.
 
 
 === OCR NOISE HANDLING ===
@@ -1087,8 +1096,16 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
            correctly spans to a known shoulder) and continue from there.
            Example: dims 2.63 and 4.13 both anchor from face 0 → 4.13 contains 2.63;
            use 4.13 as the OAL, do NOT compute 4.13 + 2.63 = 6.76.
-       iv. SUM them: length_in = A + B + C … Confidence = 0.80.
-       v.  Verify the sum makes visual sense against the part silhouette.
+       iv. BORE DEPTH CHAIN-IN TRAP: before summing, check each term — is it a bore/ID depth
+           (depth of a hole or bore measured from an end-face inward) rather than an OD step?
+           A bore depth is an INTERIOR dimension — it does NOT extend the part beyond the OD envelope.
+           Remove any bore/ID depth terms from the OAL chain sum.
+           Example: OD profile spans 4.13"; bore 0.88" dia is 0.75" deep from the right face.
+           OAL = 4.13", NOT 4.13 + 0.75 = 4.88". The 0.75" bore depth is inside the 4.13" span.
+           Quick check: if the chain sum minus the last term matches an explicit dimension on the
+           drawing, that shorter value is likely the true OAL.
+       v.  SUM the remaining OD-step terms: length_in = A + B + C … Confidence = 0.80.
+       vi. Verify the sum makes visual sense against the part silhouette.
   c) SILHOUETTE ESTIMATE — if even partial dims are absent:
        Visually compare the axial extent of the part outline vs the od_in witness marks.
        Estimate based on the apparent aspect ratio. Confidence = 0.60.
@@ -1419,10 +1436,17 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
     d) BLIND-BORE TRAP: if the part has a blind bore (open one end, closed other),
        the bore DEPTH is NOT the OAL. OAL = bore depth + closed-end wall thickness.
        Always look for a dimension spanning BOTH faces of the part, not just the bore depth.
-    e) All partial feature dims (step widths, groove depths, bore depths) should SUM
-       to approximately length_in — used for VERIFICATION only. If sum > your OAL candidate,
-       you likely picked a partial dim. If sum < your OAL, there is a wall/section not shown.
-    f) Raw/cutoff length (max_length_in) is always slightly LONGER than
+    e) BORE DEPTH CHAIN-IN TRAP: a bore/ID depth measured INWARD from an end-face is NOT
+       an OD axial step extending BEYOND that face. Do NOT add a bore depth to the OAL chain.
+       If your chain sum is (OD steps) + (bore depth), remove the bore depth term — it is
+       interior to the OD envelope.
+       Example: OD steps total 4.13"; bore 0.88" dia runs 0.75" deep from the right face.
+       OAL = 4.13", NOT 4.13 + 0.75 = 4.88".
+       Quick check: if (chain sum − last term) matches an explicit callout, that is the true OAL.
+    f) All partial OD-step dims should SUM to approximately length_in — used for VERIFICATION
+       only. If sum > your OAL candidate, you likely picked a partial dim.
+       If sum < your OAL, there is a wall/section not shown.
+    g) Raw/cutoff length (max_length_in) is always slightly LONGER than
        length_in and is found in an RM table or stock notes, not on the
        part profile.
 
