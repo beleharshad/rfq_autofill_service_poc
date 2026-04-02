@@ -146,6 +146,25 @@ od_in  (Finish OD) -- THE MAXIMUM OUTER DIAMETER OF THE FINISHED PART:
   Example: if you see Phi1.240, Phi1.006-1.008, Phi0.443, Phi0.628, Phi0.94 on the part --
   od_in = 1.240  (it is the largest, defining the outer envelope of the part)
 
+  BAR STOCK OD TOLERANCE TRAP (critical for cold-drawn / hot-rolled bar material):
+    Some drawings show the incoming BAR STOCK tolerance as a min-max range near the OD,
+    e.g. "3.996-4.000" or "3.994/4.000" when material is "1018 COLD DRAWN STEEL BAR".
+    This range is the STOCK MATERIAL OD range (ASTM A108 or similar) — it is NOT the
+    finished part OD. The upper bound (4.000) is the raw bar nominal diameter = max_od_in.
+    The actual FINISH OD is dimensioned separately on the part section/profile view and
+    will be SMALLER than this stock range (e.g. 3.00", 2.50", etc.).
+    HOW TO IDENTIFY: the bar stock OD tolerance has ALL of these signs:
+      1. It appears as a two-value range (e.g. "3.996-4.000" or "3.994/4.000").
+      2. The upper value is at or very near a whole-number or half-number (4.000, 3.500, 2.000).
+      3. The lower value is 0.003-0.010 below the upper value (typical bar stock tolerance).
+      4. Material says BAR, COLD DRAWN, HOT ROLLED, or ROUND BAR.
+    When you identify this pattern:
+      → Do NOT use the upper bound as od_in.
+      → Set max_od_in = upper bound of the range (this is the raw bar OD).
+      → Find the actual finish OD ON THE PART PROFILE VIEW (the Phi callout on the silhouette)
+        and set that smaller value as od_in.
+      → Set tolerance_od to the general profile tolerance (e.g. "±0.005"), NOT this stock range.
+
 max_od_in  (Raw Material OD / RM OD):
   This is the bar stock or tube stock you ORDER from the supplier BEFORE machining.
   It is ALWAYS larger than od_in because you machine the OD down to finish size.
@@ -1005,6 +1024,12 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
     finished profile OD. If you have no raw-stock note, max_od_in = null.
     SELF-CHECK: after choosing od_in, scan the drawing once more — is there any profile
     callout LARGER than your od_in candidate? If yes, that larger value is the true od_in.
+  BAR STOCK OD TOLERANCE TRAP:
+    When material is BAR / COLD DRAWN / HOT ROLLED and you see a two-value range near the OD
+    (e.g. "3.996-4.000"), that range is the INCOMING STOCK OD TOLERANCE, not the finish OD.
+    The upper bound (4.000) = max_od_in (raw bar diameter).
+    The FINISH OD is a separate smaller Phi callout on the profile view.
+    NEVER set od_in = upper bound of a stock OD range.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -1407,6 +1432,12 @@ STEP 2 -- FIND THE OUTER BOUNDING ENVELOPE (od_in)
     finished profile OD. If there is no raw-stock note, max_od_in = null.
     SELF-CHECK: after choosing od_in, scan once more — is there any profile callout LARGER
     than your od_in candidate? If yes, that larger value is the true od_in.
+  BAR STOCK OD TOLERANCE TRAP:
+    When material is BAR / COLD DRAWN / HOT ROLLED and you see a two-value range near the OD
+    (e.g. "3.996-4.000" or "3.994/4.000"), that range is the INCOMING STOCK OD TOLERANCE,
+    not the finish OD. The upper bound (4.000) = max_od_in (raw bar nominal diameter).
+    The FINISH OD is a separate, smaller Phi callout visible on the part profile/section view.
+    NEVER set od_in = upper bound of a stock OD range. Look past this range for the profile OD.
   PHI SYMBOL RULE (critical — prevents OD/length swap on disc/ring parts):
     ANY callout preceded by Ø / Phi / circle-O / "/O" / "Dia" = a DIAMETER, not a length.
     Even if the Phi-prefixed number is the LARGEST number on the drawing —
@@ -1991,6 +2022,49 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                   geom_max_od = max(float(geom_max_od or 0), float(_od))
           except Exception:
             geom_max_od = None
+
+          # Correction: bar stock OD tolerance range used as finish OD.
+          # Pattern: material contains BAR/COLD DRAWN/HOT ROLLED AND tolerance_od is a
+          # min-max range like "3.996-4.000" where upper bound is a round stock diameter.
+          # In this case od_in = upper bound is WRONG — it's the stock OD, not finish OD.
+          # We flag it as REVIEW and move the upper bound to max_od_in.
+          try:
+            _tol_od_raw = str(extracted.get("tolerance_od") or "")
+            _mat_raw = str(extracted.get("material") or "").upper()
+            _llm_od_r = extracted.get("od_in")
+            _is_bar = any(w in _mat_raw for w in ("BAR", "COLD DRAWN", "HOT ROLLED", "HOT-ROLLED", "COLD-DRAWN", "ROUND STOCK"))
+            _tol_range = re.fullmatch(r'\s*(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)\s*', _tol_od_raw)
+            if _is_bar and _tol_range and _llm_od_r:
+              _tol_lo = float(_tol_range.group(1))
+              _tol_hi = float(_tol_range.group(2))
+              _llm_od_r_f = float(_llm_od_r)
+              # Stock OD range: narrow band (≤ 0.015"), upper bound is round
+              _band = abs(_tol_hi - _tol_lo)
+              _hi_is_round = abs(_tol_hi - round(_tol_hi * 4) / 4) < 0.002  # nearest 0.25"
+              _od_matches_stock = abs(_llm_od_r_f - _tol_hi) <= 0.005
+              if _band <= 0.015 and _hi_is_round and _od_matches_stock:
+                # od_in is the stock OD — flag for REVIEW, move to max_od_in
+                _llm_max_od_r = extracted.get("max_od_in")
+                if not _llm_max_od_r or abs(float(_llm_max_od_r or 0) - _tol_hi) > 0.02:
+                  extracted["max_od_in"] = _tol_hi
+                # od_in should be the profile OD — we can't determine it without geometry,
+                # so we clear it and force REVIEW so a human can correct it.
+                extracted["od_in"] = None
+                validation["recommendation"] = "REVIEW"
+                validation["overall_confidence"] = min(float(validation.get("overall_confidence") or 1.0), 0.50)
+                cross = validation.get("cross_checks", []) or []
+                cross.append(
+                  f"od_in cleared: tolerance_od '{_tol_od_raw}' is a bar stock OD range "
+                  f"(band={_band:.4f}\", upper={_tol_hi}\" matches stock nominal). "
+                  f"max_od_in set to {_tol_hi}. Find actual finish OD on the profile view."
+                )
+                validation["cross_checks"] = cross
+                logger.info(
+                  "[Pipeline] bar-stock-tol correction: od_in %.3f cleared (stock range %s), max_od_in=%.3f, forced REVIEW",
+                  _llm_od_r_f, _tol_od_raw, _tol_hi,
+                )
+          except Exception:
+            logger.debug("[Pipeline] bar-stock-tol OD correction failed", exc_info=True)
 
           # Narrow corrective override for a common LLM failure:
           # material/title stock DIA copied into finish OD.
