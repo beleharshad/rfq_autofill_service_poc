@@ -2043,24 +2043,33 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
               _hi_is_round = abs(_tol_hi - round(_tol_hi * 4) / 4) < 0.002  # nearest 0.25"
               _od_matches_stock = abs(_llm_od_r_f - _tol_hi) <= 0.005
               if _band <= 0.015 and _hi_is_round and _od_matches_stock:
-                # od_in is the stock OD — flag for REVIEW, move to max_od_in
+                # od_in is the stock OD — flag for REVIEW, move to max_od_in.
+                # NOTE: do NOT set od_in=None — the frontend clamps null→0 →
+                # Math.max(0.001,0)=0.001 in the 3D viewer, causing "Finish OD: 0.001".
+                # Instead keep the stock-nominal value as a low-confidence placeholder
+                # with a clear issue warning that a human must correct it.
                 _llm_max_od_r = extracted.get("max_od_in")
                 if not _llm_max_od_r or abs(float(_llm_max_od_r or 0) - _tol_hi) > 0.02:
                   extracted["max_od_in"] = _tol_hi
-                # od_in should be the profile OD — we can't determine it without geometry,
-                # so we clear it and force REVIEW so a human can correct it.
-                extracted["od_in"] = None
+                # Annotate od_in as low-confidence / needs correction
+                _vf = validation.setdefault("fields", {})
+                _od_vf = _vf.setdefault("od_in", {})
+                _od_vf["confidence"] = 0.25
+                _od_vf["issue"] = (
+                  f"od_in={_llm_od_r_f} appears to be the bar stock OD from tolerance range "
+                  f"'{_tol_od_raw}' — NOT the finish OD. Verify actual finish OD from profile view."
+                )
                 validation["recommendation"] = "REVIEW"
                 validation["overall_confidence"] = min(float(validation.get("overall_confidence") or 1.0), 0.50)
                 cross = validation.get("cross_checks", []) or []
                 cross.append(
-                  f"od_in cleared: tolerance_od '{_tol_od_raw}' is a bar stock OD range "
+                  f"od_in={_llm_od_r_f} suspect: tolerance_od '{_tol_od_raw}' is a bar stock OD range "
                   f"(band={_band:.4f}\", upper={_tol_hi}\" matches stock nominal). "
                   f"max_od_in set to {_tol_hi}. Find actual finish OD on the profile view."
                 )
                 validation["cross_checks"] = cross
                 logger.info(
-                  "[Pipeline] bar-stock-tol correction: od_in %.3f cleared (stock range %s), max_od_in=%.3f, forced REVIEW",
+                  "[Pipeline] bar-stock-tol correction: od_in %.3f flagged as stock OD (range %s), max_od_in=%.3f, forced REVIEW",
                   _llm_od_r_f, _tol_od_raw, _tol_hi,
                 )
           except Exception:

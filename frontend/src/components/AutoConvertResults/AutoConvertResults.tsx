@@ -661,10 +661,19 @@ function AutoConvertResults({
   function chooseDim(field: 'od_in' | 'max_od_in' | 'id_in' | 'length_in') {
     const llmVals: any = ed || null;
     const geomVals: any = stackDims || null;
-    const llmHas  = llmVals && typeof llmVals[field] === 'number' && llmVals[field] > 0;
-    const geomHas = geomVals && typeof geomVals[field] === 'number' && geomVals[field] > 0;
+    // Check the RAW LLM extracted value (before effectiveDims clamps null→0.001)
+    // so that a missing LLM value correctly falls through to geometry.
+    const overrideMap: Record<string, number | null> = {
+      od_in: odOvr, max_od_in: maxOdOvr, id_in: idOvr, length_in: lenOvr,
+    };
+    const hasOverride = overrideMap[field] != null;
+    const rawLlmVal   = llmAnalysis?.extracted?.[field] ?? null;
+    // "LLM has it" only when there is a manual override OR the LLM actually returned a
+    // positive value (not null/0).  effectiveDims.clamp(null→0.001) must NOT qualify.
+    const llmHas  = hasOverride || (rawLlmVal != null && typeof rawLlmVal === 'number' && rawLlmVal > 0);
+    const geomHas = geomVals && typeof geomVals[field] === 'number' && (geomVals[field] as number) > 0;
     // Always prefer LLM; fall back to geometry only when LLM has no value.
-    if (llmHas) return { value: llmVals[field] as number, source: 'LLM' };
+    if (llmHas && llmVals) return { value: llmVals[field] as number, source: 'LLM' };
     if (geomHas) return { value: geomVals[field] as number, source: 'Geometry' };
     return { value: 0, source: 'Unknown' };
   }
