@@ -2052,6 +2052,54 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
           except Exception:
             logger.debug("[Pipeline] half-length -> OAL correction failed", exc_info=True)
 
+          # Deterministic correction: bore depth included in OAL chain sum.
+          # The LLM's own validation issue text records the chain terms, e.g.
+          # "Derived from chain sum of axial dimensions (4.13 + 0.75)".
+          # If the part has a bore (id_in > 0) and the last term is ≤ a bore-depth
+          # threshold, the last term is a bore depth — it is interior to the OD
+          # envelope and must NOT appear in the OAL chain. Correct to the largest term.
+          # This does NOT require geometry confidence — it uses LLM self-reported data.
+          try:
+            _llm_len = extracted.get("length_in")
+            _llm_id = extracted.get("id_in")
+            _llm_od = extracted.get("od_in")
+            _len_field = (validation.get("fields") or {}).get("length_in") or {}
+            _len_issue = str(_len_field.get("issue") or "").lower()
+            if _llm_len and _llm_id and float(_llm_id) > 0 and "chain" in _len_issue:
+              _llm_len_f = float(_llm_len)
+              _llm_id_f = float(_llm_id)
+              _llm_od_f = float(_llm_od or 0)
+              # Prefer the parenthesised expression "(A + B + …)" in the issue text.
+              _chain_m = re.search(r'\(([0-9.\s+]+)\)', _len_issue)
+              if _chain_m:
+                _terms = [float(x) for x in re.findall(r'\d+(?:\.\d+)?', _chain_m.group(1)) if float(x) > 0.01]
+              else:
+                # Fallback: collect numbers in the issue that are < length_in.
+                _terms = [float(x) for x in re.findall(r'\d+(?:\.\d+)?', _len_issue)
+                          if 0.01 < float(x) < _llm_len_f]
+              # Only proceed when the parsed terms actually reproduce length_in.
+              if len(_terms) >= 2 and abs(sum(_terms) - _llm_len_f) < 0.05:
+                _largest = max(_terms)
+                _tail = _llm_len_f - _largest
+                # The tail must be small enough to be a bore/ID depth, not a real OD step.
+                _bore_depth_limit = max(_llm_id_f * 2.0, _llm_od_f * 0.30, 0.30)
+                if 0.05 < _tail <= _bore_depth_limit and _largest > _llm_len_f * 0.50:
+                  extracted["length_in"] = round(_largest, 4)
+                  cross = validation.get("cross_checks", []) or []
+                  cross.append(
+                    f"length_in corrected: bore depth included in OAL chain sum. "
+                    f"Corrected {_llm_len_f} → {_largest} in "
+                    f"(bore_depth_term={_tail:.3f} in ≤ limit={_bore_depth_limit:.3f} in, id_in={_llm_id_f} in)."
+                  )
+                  validation["cross_checks"] = cross
+                  logger.info(
+                    "[Pipeline] bore-depth-chain-in correction: length_in %.3f → %.3f "
+                    "(tail=%.3f, id_in=%.3f, od_in=%.3f)",
+                    _llm_len_f, _largest, _tail, _llm_id_f, _llm_od_f,
+                  )
+          except Exception:
+            logger.debug("[Pipeline] bore-depth chain-in correction failed", exc_info=True)
+
           # Only fill id_in from geometry when LLM did NOT extract one.
           try:
             if extracted.get("id_in") is None or float(extracted.get("id_in") or 0) <= 0:
