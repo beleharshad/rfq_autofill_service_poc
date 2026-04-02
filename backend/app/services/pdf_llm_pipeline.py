@@ -117,6 +117,11 @@ Before reading any number off the drawing, identify what kind of part you are lo
     the part may be a disc, ring, bracket, or spacer cut from flat stock.
     od_in still represents the largest outer cross-sectional dimension of the finished part.
     length_in is the overall axial thickness/length.
+    If the material/title block contains a stock size like "4.00 DIA 1018 CRS",
+    "3.5 OD TUBE", or "2.00 BAR", that stock-size diameter belongs to max_od_in
+    (raw material), NOT od_in, unless the drawing explicitly shows the finished profile
+    also remains at that exact diameter. Do NOT copy the stock/material diameter into
+    od_in just because it is the largest diameter-like number in the title block.
 
 
 === FUNDAMENTAL CONCEPT: WHAT EACH FIELD MEANS ===
@@ -139,6 +144,8 @@ max_od_in  (Raw Material OD / RM OD):
   It is typically found in a SEPARATE table, title block note, or RM/STOCK section --
   NOT as a dimension on the main part profile views.
   Labels: RM OD, Raw OD, Stock OD, Bar Dia, Material OD, Blank OD, Purchase OD.
+  Very common pattern: material note like "4.00 DIA 1018 CRS" or "2.50 DIA ALUM".
+  In that case 4.00 / 2.50 is the STOCK diameter → max_od_in, not the finished od_in.
   If not explicitly stated, it can be inferred: od_in + machining allowance (usually +0.06" to +0.25").
 
 id_in  (Finish ID / Primary Bore):
@@ -201,6 +208,13 @@ length_in  (Finish Length / OAL):
       stock/cutoff notes that conflicts with the chain-sum or silhouette estimate, DO NOT
       return the RM/table value as `length_in`. Prefer the chain-sum (0.80 confidence)
       or silhouette estimate (0.60 confidence) for `length_in` and annotate the source.
+    SYMMETRY / HALF-VIEW TRAP:
+      Some drawings dimension only from the CENTERLINE or mid-plane to one face on a
+      symmetric part (end cap, flange, plug, spool, etc.). That centerline-to-face distance
+      is HALF the overall length. If the profile is mirrored about a vertical center plane
+      and you only see 1.44 or 1.45 from centerline to one end, OAL is about 2.88 or 2.90,
+      not 1.45. Always determine whether an axial dimension is full-face-to-face or only
+      centerline-to-face before assigning length_in.
   4. NEVER return null for length_in on a turned part. Null prevents quoting.
 
   NOT a partial feature (not a step height, groove depth, bore depth, or shoulder distance).
@@ -1036,6 +1050,7 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
     ✗ Step HEIGHT or SHOULDER WIDTH — one segment of the part, not the full span.
     ✗ RM / cutoff length from the stock table — that is max_length_in, always > length_in.
     ✗ A diameter callout (Phi numbers) — length is measured along the axis, not width.
+    ✗ Centerline-to-face half-dimension on a symmetric part — double it to get full OAL.
 
   EXTRACTION PROTOCOL:
   a) PRIMARY — find the SINGLE dimension witness line spanning the FULL axial extent:
@@ -1045,6 +1060,8 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
        → If found and clearly spans the full extent: use it. Confidence 0.90+.
        → STOP: do NOT add partial step dimensions to it. Any step dimension that starts
          from the same end-face is a sub-section WITHIN this OAL, not additive beyond it.
+       → If the drawing is symmetric about a center plane and the shown dimension only runs
+         from centerline to one face, DOUBLE it to get the full OAL.
   b) CHAIN-SUM FALLBACK — if no single full-span line:
        i.  List EVERY sequential partial axial dimension you can find on the part profile
            (each step width, each shoulder length, each sub-section). Write them all out.
@@ -1218,6 +1235,8 @@ class MergedAgent:
             id_  = float(ext.get("id_in")     or 0)
             ln   = float(ext.get("length_in") or 0)
             name = str(ext.get("part_name") or "").upper()
+            material = str(ext.get("material") or "").upper()
+            max_od = float(ext.get("max_od_in") or 0)
 
             hard_errors:  list[str] = []  # → REJECT
             soft_warnings: list[str] = []  # → REVIEW
@@ -1250,6 +1269,12 @@ class MergedAgent:
                     soft_warnings.append(f"length/OD = {aspect:.1f} > 15 — unusually long part")
                 elif aspect < 0.1:
                     soft_warnings.append(f"length/OD = {aspect:.2f} < 0.10 — unusually flat part")
+            if od > 0 and max_od > 0 and material and "DIA" in material:
+              if abs(max_od - od) <= 0.01:
+                soft_warnings.append(
+                  f"od_in ({od}) is nearly identical to max_od_in ({max_od}) while material contains 'DIA' "
+                  f"— possible raw-stock diameter copied into Finish OD"
+                )
 
             if hard_errors:
                 rec  = "REJECT"
@@ -1366,6 +1391,8 @@ STEP 4 -- FIND THE OVERALL LENGTH (length_in)
     c) PRIMARY: look for a SINGLE dimension spanning from one end-face to the other (OAL).
        If found — STOP. Do NOT add partial step dimensions to it. Any step dimension that
        starts from the same end-face is a sub-section WITHIN this OAL, not extra length.
+       If the view is symmetric and the shown dimension runs only from the centerline to one
+       end-face, DOUBLE it to recover the full OAL.
        SEGMENT OVERLAP TRAP (most common chain-sum error on stepped parts):
          If you see two axial dimensions that both anchor from the SAME end-face (e.g.,
          2.63\" and 4.13\" both measured from the left face), the larger one (4.13\") already
