@@ -19,6 +19,7 @@ GET /api/v1/llm/jobs/{job_id}/llm-analysis/export-excel
 import io
 import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -33,6 +34,7 @@ job_service = JobService()
 file_storage = FileStorage()
 
 _RESULT_FILENAME = "llm_analysis.json"
+_CORRECTIONS_FILENAME = "corrections.json"
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +348,74 @@ async def export_job_llm_analysis_excel(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers=headers,
     )
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-Loop dimension corrections
+# ---------------------------------------------------------------------------
+
+
+@router.post("/jobs/{job_id}/corrections")
+async def save_correction(job_id: str, payload: dict):
+    """Persist a single user-corrected dimension for a job.
+
+    Payload shape::
+
+        { "field": "od_in", "value": 1.880, "original_value": 1.50 }
+
+    Corrections are stored as ``outputs/corrections.json`` alongside
+    ``llm_analysis.json``.  The frontend reads them back on next load so
+    overrides survive page refresh.
+    """
+    # Use filesystem as source-of-truth so this works even when the SQLite
+    # registry has been wiped / job was created in a previous server session.
+    _job_dir = file_storage.get_job_path(job_id)
+    if not _job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    field = payload.get("field")
+    if not field:
+        raise HTTPException(status_code=422, detail="'field' is required")
+
+    outputs_path = file_storage.get_outputs_path(job_id)
+    outputs_path.mkdir(parents=True, exist_ok=True)
+    corrections_path = outputs_path / _CORRECTIONS_FILENAME
+
+    existing: dict = {}
+    if corrections_path.exists():
+        try:
+            existing = json.loads(corrections_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+    existing[field] = {
+        "field": field,
+        "value": payload.get("value"),
+        "original_value": payload.get("original_value"),
+        "corrected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    corrections_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return {"saved": True, "field": field, "value": payload.get("value")}
+
+
+@router.get("/jobs/{job_id}/corrections")
+async def get_corrections(job_id: str):
+    """Return the persisted dimension corrections map for a job.
+
+    Returns an empty object ``{}`` when no corrections have been saved yet.
+    """
+    # Use filesystem as source-of-truth so this works even when the SQLite
+    # registry has been wiped / job was created in a previous server session.
+    _job_dir = file_storage.get_job_path(job_id)
+    if not _job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    outputs_path = file_storage.get_outputs_path(job_id)
+    corrections_path = outputs_path / _CORRECTIONS_FILENAME
+
+    if not corrections_path.exists():
+        return {}
+    try:
+        return json.loads(corrections_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
