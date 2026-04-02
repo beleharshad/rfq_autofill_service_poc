@@ -56,7 +56,7 @@ def _pending_stub() -> dict:
             "recommendation": "PENDING",
             "overall_confidence": 0.0,
             "fields": {},
-            "cross_checks": ["LLM analysis is running in the background. This page will update automatically."],
+            "cross_checks": ["Analysis is running in the background. This page will update automatically."],
         },
         "code_issues": [],
         "valid": False,

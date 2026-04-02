@@ -732,28 +732,24 @@ function AutoConvertResults({
                 <span className="acr-stat-label">Finish OD</span>
                 <span className="acr-stat-val">
                   {displayDims.od_in.value.toFixed(3)}<span className="acr-stat-unit"> in</span>
-                  <small className={`acr-source-badge acr-source-badge--${String(displayDims.od_in.source).toLowerCase()}`}>{displayDims.od_in.source}</small>
                 </span>
               </div>
               <div className="acr-stat-box">
                 <span className="acr-stat-label">MAX OD</span>
                 <span className="acr-stat-val">
                   {displayDims.max_od_in.value.toFixed(3)}<span className="acr-stat-unit"> in</span>
-                  <small className={`acr-source-badge acr-source-badge--${String(displayDims.max_od_in.source).toLowerCase()}`}>{displayDims.max_od_in.source}</small>
                 </span>
               </div>
               <div className="acr-stat-box">
                 <span className="acr-stat-label">Finish ID</span>
                 <span className="acr-stat-val">
                   {displayDims.id_in.value.toFixed(3)}<span className="acr-stat-unit"> in</span>
-                  <small className={`acr-source-badge acr-source-badge--${String(displayDims.id_in.source).toLowerCase()}`}>{displayDims.id_in.source}</small>
                 </span>
               </div>
               <div className="acr-stat-box">
                 <span className="acr-stat-label">Length</span>
                 <span className="acr-stat-val">
                   {displayDims.length_in.value.toFixed(3)}<span className="acr-stat-unit"> in</span>
-                  <small className={`acr-source-badge acr-source-badge--${String(displayDims.length_in.source).toLowerCase()}`}>{displayDims.length_in.source}</small>
                 </span>
               </div>
             </div>
@@ -769,14 +765,14 @@ function AutoConvertResults({
                 <div className="acr-dims-header">
                   <span className="acr-rec-badge acr-rec-badge--pending">⏳ Analyzing…</span>
                   <span className="acr-material" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
-                    LLM extraction running in background
+                    Extraction running in background
                   </span>
                 </div>
               ) : llmAnalysis.error ? (
                 /* ── LLM error (rate limit or pipeline failure) ── */
                 <>
                   <div className="acr-dims-header">
-                    <span className="acr-rec-badge acr-rec-badge--review">⚠ LLM Unavailable</span>
+                    <span className="acr-rec-badge acr-rec-badge--review">⚠ Unavailable</span>
                   </div>
                   <ul className="acr-cross-checks">
                     {crossChecks.length > 0

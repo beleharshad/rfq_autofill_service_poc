@@ -99,7 +99,7 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
     try {
       const data = await api.getLlmAnalysis(jobId);
       if (data === null) {
-        setError('No analysis found yet — click \'▶ Run LLM Analysis\' to generate one.');
+        setError('No analysis found yet — click \'▶ Run Analysis\' to generate one.');
       } else {
         setResult(data);
       }
@@ -164,7 +164,7 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
       {/* ── Header ── */}
       <div className="llm-panel-header">
         <div>
-          <h2 className="llm-panel-title">LLM PDF Analysis</h2>
+          <h2 className="llm-panel-title">PDF Analysis</h2>
           <p className="llm-panel-subtitle">
             Two-agent pipeline: Agent 1 extracts specs, Agent 2 validates them.
           </p>
@@ -177,7 +177,7 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
             ↻ Refresh
           </button>
           <button className="btn btn-primary" onClick={runAnalysis} disabled={running}>
-            {running ? '⏳ Analysing…' : '▶ Run LLM Analysis'}
+            {running ? '⏳ Analysing…' : '▶ Run Analysis'}
           </button>
           {result && (
             <button className="btn btn-excel" onClick={downloadExcel} disabled={exporting}>
@@ -192,7 +192,7 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
       {running && (
         <div className="llm-running">
           <div className="spinner" />
-          <span>Running two-agent LLM pipeline — this may take 10–30 s…</span>
+          <span>Running analysis — this may take 10–30 s…</span>
         </div>
       )}
 

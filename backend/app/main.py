@@ -12,10 +12,12 @@ _trace_fh.setLevel(logging.INFO)
 _trace_fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
 logging.getLogger().addHandler(_trace_fh)
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq, envelope, llm, llm_pdf, preview3d
-from app.security import require_api_key
+from app.security import require_api_key, check_rate_limit
 
 # In production (PRODUCTION=true) disable the interactive Swagger/ReDoc UIs so
 # the full API surface is not publicly browseable via /docs or /redoc.
@@ -29,6 +31,48 @@ app = FastAPI(
     redoc_url=None if _is_production else "/redoc",
     openapi_url=None if _is_production else "/openapi.json",
 )
+
+# ---------------------------------------------------------------------------
+# Request body size limit (50 MB) — rejects oversized uploads before they
+# are buffered into memory.
+# ---------------------------------------------------------------------------
+_MAX_BODY_BYTES: int = int(os.environ.get("MAX_BODY_MB", "50")) * 1024 * 1024
+
+
+class _BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > _MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": f"Request body too large (max {_MAX_BODY_BYTES // (1024*1024)} MB)."},
+            )
+        return await call_next(request)
+
+
+app.add_middleware(_BodySizeLimitMiddleware)
+
+# ---------------------------------------------------------------------------
+# Per-IP rate limiting — applied to all routes except /api/v1/health.
+# ---------------------------------------------------------------------------
+
+class _RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/v1/health"):
+            client_ip = request.client.host if request.client else "unknown"
+            try:
+                check_rate_limit(client_ip)
+            except Exception as exc:
+                from fastapi import status as _status
+                return JSONResponse(
+                    status_code=_status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": str(exc)},
+                    headers={"Retry-After": "60"},
+                )
+        return await call_next(request)
+
+app.add_middleware(_RateLimitMiddleware)
 
 # CORS configuration – expand with production origin when ALLOWED_ORIGINS env var is set.
 _extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
@@ -80,7 +124,7 @@ async def _clear_stuck_pending_stubs() -> None:
 
     _interrupted_stub = {
         "pending": False,
-        "error": "LLM analysis was interrupted (server restarted). Click Auto-Detect to try again.",
+        "error": "Analysis was interrupted (server restarted). Click Auto-Detect to try again.",
         "error_type": "interrupted",
         "rate_limit_info": None,
         "extracted": {},
@@ -89,7 +133,7 @@ async def _clear_stuck_pending_stubs() -> None:
             "overall_confidence": 0.0,
             "fields": {},
             "cross_checks": [
-                "LLM pipeline was interrupted by a server restart. "
+                "Analysis pipeline was interrupted by a server restart. "
                 "Click Auto-Detect to run a fresh analysis."
             ],
         },

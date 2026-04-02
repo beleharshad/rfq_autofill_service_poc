@@ -11,12 +11,39 @@ from app.services.job_service import JobService
 from app.services.run_report_service import RunReportService
 from app.storage.file_storage import FileStorage
 from app.utils.outputs_helper import build_outputs_info
+from app.security import validate_job_id
 
 router = APIRouter()
 
 job_service = JobService()
 file_storage = FileStorage()
 run_report_service = RunReportService()
+
+# Allowed upload MIME types and their canonical extensions
+_ALLOWED_MIME = {
+    "application/pdf",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",  # some browsers send this for .pdf/.zip
+}
+_ALLOWED_EXT = {".pdf", ".zip"}
+_MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB per file
+
+
+def _validate_upload(file: UploadFile) -> None:
+    """Raise 400/413 if *file* has a disallowed extension or exceeds the size limit."""
+    name = (file.filename or "").lower()
+    ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in _ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed: '{file.filename}'. Only PDF and ZIP files are accepted.",
+        )
+    if file.size is not None and file.size > _MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File '{file.filename}' exceeds the 50 MB upload limit.",
+        )
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -38,6 +65,16 @@ async def create_job(
     Returns job with status CREATED and list of input files.
     """
     try:
+        # Validate and sanitise text inputs
+        if name:
+            name = name[:200].strip()
+        if description:
+            description = description[:1000].strip()
+
+        # Validate each uploaded file before creating the job
+        for f in (files or []):
+            _validate_upload(f)
+
         job_id = job_service.create_job(name, description, mode)
 
         if files and len(files) > 0:
@@ -67,6 +104,7 @@ async def list_jobs():
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str):
     """Get job details with run report summary and outputs info."""
+    validate_job_id(job_id)
     job = job_service.get_job(job_id)
 
     report_summary = run_report_service.get_report_summary(job_id)
@@ -88,6 +126,7 @@ async def list_job_files(job_id: str):
     - outputs/pdf_pages/page_0.png
     - outputs/pdf_views/page_0_views.json
     """
+    validate_job_id(job_id)
     _ = job_service.get_job(job_id)  # verify job exists
 
     files = []
@@ -118,12 +157,9 @@ async def download_file(job_id: str, path: str):
     """Download a file from a job.
 
     Safe download with path traversal protection.
-
-    ✅ Fix: allow frontend to fetch rendered images and view JSON from:
-    - outputs/pdf_pages/*.png
-    - outputs/pdf_views/*.json
-    plus key JSON artifacts used by auto pipeline.
     """
+    validate_job_id(job_id)
+
     # Verify job exists
     try:
         _ = job_service.get_job(job_id)
@@ -217,6 +253,7 @@ async def download_file(job_id: str, path: str):
 @router.put("/{job_id}/mode", response_model=JobResponse)
 async def set_job_mode(job_id: str, request: JobModeRequest):
     """Set job processing mode."""
+    validate_job_id(job_id)
     job_service.set_job_mode(job_id, request.mode)
     return job_service.get_job(job_id)
 
@@ -224,6 +261,7 @@ async def set_job_mode(job_id: str, request: JobModeRequest):
 @router.put("/{job_id}/selected-view")
 async def set_selected_view(job_id: str, request: dict):
     """Save selected view to job state."""
+    validate_job_id(job_id)
     _ = job_service.get_job(job_id)  # verify job exists
 
     outputs_path = file_storage.get_outputs_path(job_id)
@@ -251,5 +289,6 @@ async def set_selected_view(job_id: str, request: dict):
 @router.delete("/{job_id}")
 async def delete_job(job_id: str):
     """Delete a job and all its files."""
+    validate_job_id(job_id)
     job_service.delete_job(job_id)
     return {"message": "Job deleted successfully"}

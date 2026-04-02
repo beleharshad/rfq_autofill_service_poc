@@ -2181,7 +2181,7 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
             extracted["length_in"] = geom_len
             cross = validation.get("cross_checks", []) or []
             cross.append(
-              f"length_in filled from geometry (LLM had no value): {geom_len} in, geom_conf={float(geom_conf or 0):.2f}"
+              f"length_in filled from geometry (no value extracted): {geom_len} in, geom_conf={float(geom_conf or 0):.2f}"
             )
             validation["cross_checks"] = cross
 
@@ -2307,7 +2307,7 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
                   extracted["id_in"] = float(candidate_id)
                   cross = validation.get("cross_checks", []) or []
                   cross.append(
-                    f"id_in filled from geometry segment (LLM had no value): id_diameter={candidate_id} in, seg_conf={best_seg.get('confidence')}"
+                    f"id_in filled from geometry segment (no value extracted): id_diameter={candidate_id} in, seg_conf={best_seg.get('confidence')}"
                   )
                   validation["cross_checks"] = cross
           except Exception:
