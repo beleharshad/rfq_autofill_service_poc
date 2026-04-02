@@ -2072,6 +2072,39 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
       pass
 
     code_issues = _code_validate(extracted)
+    try:
+      _name = str(extracted.get("part_name") or "").upper()
+      _material = str(extracted.get("material") or "").upper()
+      _tol_od = str(extracted.get("tolerance_od") or "")
+      _od = float(extracted.get("od_in") or 0)
+      _max_od = float(extracted.get("max_od_in") or 0)
+      _len = float(extracted.get("length_in") or 0)
+      _cap_like = any(tok in _name for tok in ("END CAP", "CAP", "PLUG", "FLANGE", "SPOOL"))
+      _bar_like = "BAR" in _material or "COLD DRAWN" in _material or "CRS" in _material
+      _tol_hi = None
+      _m_tol = re.search(r'(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)', _tol_od)
+      if _m_tol:
+        try:
+          _tol_hi = max(float(_m_tol.group(1)), float(_m_tol.group(2)))
+        except Exception:
+          _tol_hi = None
+      _od_near_stock = _od > 0 and _max_od > 0 and abs(_od - _max_od) <= 0.02
+      _tol_near_od = _tol_hi is not None and abs(_tol_hi - _od) <= 0.02
+      _short_cap = _od > 0 and _len > 0 and (_len / _od) < 0.45
+      if _cap_like and _bar_like and _od_near_stock and _tol_near_od and _short_cap:
+        cross = validation.get("cross_checks", []) or []
+        msg = (
+          "Suspicious END CAP extraction: Finish OD matches stock/tolerance OD and length is unusually short "
+          "for a cap-like part. Possible raw-stock OD confusion and/or centerline-to-face half-length error."
+        )
+        if msg not in cross:
+          cross.append(msg)
+        validation["cross_checks"] = cross
+        validation["recommendation"] = "REVIEW"
+        validation["overall_confidence"] = min(float(validation.get("overall_confidence") or 0.85), 0.45)
+    except Exception:
+      logger.debug("[Pipeline] suspicious END CAP review guard failed", exc_info=True)
+
     llm_recommendation = validation.get("recommendation", "REVIEW")
     valid = (llm_recommendation == "ACCEPT") and (len(code_issues) == 0)
 
