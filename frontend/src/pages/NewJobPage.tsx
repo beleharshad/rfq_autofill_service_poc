@@ -12,6 +12,7 @@ function NewJobPage() {
   const [description, setDescription] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [loadingSample, setLoadingSample] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,6 +61,33 @@ function NewJobPage() {
     }
   };
 
+  const handleUseSamplePdf = async () => {
+    setLoadingSample(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/sample-demo.pdf');
+      if (!response.ok) {
+        throw new Error('Failed to load sample PDF.');
+      }
+
+      const blob = await response.blob();
+      const sampleFile = new File([blob], 'sample-demo.pdf', { type: 'application/pdf' });
+      setFiles([sampleFile]);
+
+      if (!name) {
+        setName('Sample Demo Job');
+      }
+      if (!description) {
+        setDescription('Demo upload using the built-in sample PDF.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load sample PDF');
+    } finally {
+      setLoadingSample(false);
+    }
+  };
+
   return (
     <div className="new-job-page">
       <h1>Create New Job</h1>
@@ -83,6 +111,17 @@ function NewJobPage() {
         </div>
         <div className="form-group">
           <label htmlFor="job-files">Upload PDF or ZIP Files *</label>
+          <div className="sample-upload-row">
+            <button
+              type="button"
+              className="sample-file-button"
+              onClick={handleUseSamplePdf}
+              disabled={loadingSample || uploading}
+            >
+              {loadingSample ? 'Loading sample…' : 'Use Free Sample PDF'}
+            </button>
+            <span className="sample-file-note">Try the app instantly with a built-in demo file.</span>
+          </div>
           <input
             type="file"
             id="job-files"
@@ -90,7 +129,6 @@ function NewJobPage() {
             multiple
             accept=".pdf,.zip,application/pdf,application/zip"
             onChange={handleFileChange}
-            required
             className="file-input"
           />
           {files.length > 0 && (

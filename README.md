@@ -123,42 +123,7 @@ Change the RM Rate, tweak the Qty, update the exchange rate — every downstream
 
 ## Quick Start
 
-### Prerequisites
-
-| Requirement | Notes |
-|---|---|
-| Python 3.9+ | `python --version` |
-| Node.js 18+ | `node --version` |
-| Tesseract OCR | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) — add to PATH |
-| AI API key | Set in `backend/.env` (contact admin for key) |
-
-### 1. Configure environment
-
-```bash
-# backend/.env  — contact admin for the correct values
-# DO NOT commit this file
-```
-
-### 2. Start the backend
-
-```bash
-cd backend
-python -m venv venv && venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-python run.py
-```
-
-→ API live at **http://localhost:8000**
-
-### 3. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-→ App live at **http://localhost:5173**
+Open the live app at **https://quotemycad.com/**
 
 ---
 
