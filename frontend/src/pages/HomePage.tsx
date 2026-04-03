@@ -16,7 +16,7 @@ function HomePage() {
       <div className="home-hero">
         <h1>QuoteMyCAD</h1>
         <p className="home-description">
-          AI-powered RFQ autofill — upload an engineering drawing and get instant manufacturing metrics.
+          AI-powered — upload an engineering drawing and get instant manufacturing metrics.
         </p>
         <Link to="/jobs/new" className="new-job-button">
           New Job
