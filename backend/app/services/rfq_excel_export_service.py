@@ -282,8 +282,8 @@ def _apply_row_formulas(ws, row: int, header_map: Dict[str, int]) -> None:
     if X and W:
         set_formula("Material Cost", f"={X}{r}*{W}{r}")
 
-    # ── 5. Roughing Cost = Finish Length (MM) × 1.5 ──────────────────────────
-    if S:  set_formula("Roughing Cost", f"={S}{r}*1.5")
+    # ── 5. Roughing Cost = Finish Length (MM) ────────────────────────────────
+    if S:  set_formula("Roughing Cost", f"={S}{r}")
 
     # ── 6. Turning Time = (Finish Length MM × 10 / 40) ───────────────────────
     if S:  set_formula("Turning Time In Min", f"=({S}{r}*10/40)")
@@ -300,10 +300,10 @@ def _apply_row_formulas(ws, row: int, header_map: Dict[str, int]) -> None:
         set_formula("Sub Total",
             f"=(SUM({'+'.join(f'{c}{r}' for c in sub_parts)}))")
 
-    # ── 10. Markups — exact percentages from original (3 / 15 / 2 %) ─────────
+    # ── 10. Markups — workbook percentages (3 / 20 / 2 %) ───────────────────
     if AH:
         set_formula("P&F",            f"={AH}{r}*3%")
-        set_formula("OH & Profit",    f"={AH}{r}*15%")
+        set_formula("OH & Profit",    f"={AH}{r}*20%")
         set_formula("Rejection Cost", f"={AH}{r}*2%")
 
     # ── 11. Price/Each In INR = SUM(AK+AJ+AI+AH) ─────────────────────────────
@@ -314,7 +314,7 @@ def _apply_row_formulas(ws, row: int, header_map: Dict[str, int]) -> None:
 
     # ── 12. Price/Each In Currency = (Price INR / Exchange Rate) ─────────────
     if AL and AQ:
-        set_formula("Price/Each In Currency", f"=({AL}{r}/{AQ}{r})")
+        set_formula("Price/Each In Currency", f'=IF(OR({AQ}{r}=0,{AQ}{r}=""),0,({AL}{r}/{AQ}{r}))')
 
     # ── 13. Annual Potential = Price Currency × Annual Potential Qty ──────────
     if AM and G:

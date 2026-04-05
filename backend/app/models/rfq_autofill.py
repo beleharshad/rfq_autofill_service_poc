@@ -109,7 +109,7 @@ class RFQAutofillEstimate(BaseModel):
     # Subtotal and markups
     subtotal: RFQFieldValue
     pf_cost: Optional[RFQFieldValue] = Field(None, description="P&F cost (3% of subtotal)")
-    oh_profit: Optional[RFQFieldValue] = Field(None, description="OH & Profit (15% of subtotal)")
+    oh_profit: Optional[RFQFieldValue] = Field(None, description="OH & Profit (20% of subtotal)")
     rejection_cost: Optional[RFQFieldValue] = Field(None, description="Rejection cost (2% of subtotal)")
     
     # Final prices

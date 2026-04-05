@@ -1952,7 +1952,7 @@ class RFQAutofillService:
                 if pf_pct is None:
                     pf_pct = 0.03  # 3%
                 if oh_profit_pct is None:
-                    oh_profit_pct = 0.15  # 15%
+                    oh_profit_pct = 0.20  # 20%
                 if rejection_pct is None:
                     rejection_pct = 0.02  # 2%
                 
@@ -2058,9 +2058,10 @@ class RFQAutofillService:
                 if not (_GOOD_SCALE or _OK_SCALE) and (drilling_minutes > 0 or milling_minutes > 0):
                     feature_time_conf = min(feature_time_conf, 0.4)
 
-                # Turning time calculation: 15 minutes per inch of finish length
+                # Turning time calculation matches template: Finish Length (MM) × 10 / 40
                 finish_len_val = float(finish_len_in or 0.0)
-                turning_minutes = float(finish_len_val * 15.0)
+                finish_len_mm_val = float(finish_len_val * 25.4)
+                turning_minutes = float(finish_len_mm_val * 10.0 / 40.0)
                 turning_cost = float(turning_minutes * float(turning_rate))
 
                 # VMC cost (stored for reference; subtotal uses drilling_cost + milling_cost)
@@ -2070,10 +2071,9 @@ class RFQAutofillService:
                 drilling_cost = float(drilling_minutes * float(turning_rate)) if drilling_minutes > 0 else 0.0
                 milling_cost = float(milling_minutes * float(turning_rate)) if milling_minutes > 0 else 0.0
 
-                # Roughing cost formula from template: Finish Length (MM) × 1.5
+                # Roughing cost formula from workbook: Finish Length (MM)
                 if roughing_cost_in == 0.0:
-                    finish_len_mm_val = float(finish_len_val * 25.4)  # Convert inches to mm
-                    roughing_cost_in = float(finish_len_mm_val * 1.5)
+                    roughing_cost_in = float(finish_len_mm_val)
 
                 # Subtotal calculation (sum of all costs before markups).
                 # Use rounded values to match the per-field precision so that

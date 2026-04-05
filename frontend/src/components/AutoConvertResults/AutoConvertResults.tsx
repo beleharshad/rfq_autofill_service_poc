@@ -44,7 +44,6 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
-
 /** Merge LLM extracted dims with optional user overrides (null = use LLM). */
 export function effectiveDims(
   llm: any,
@@ -430,7 +429,6 @@ function AutoConvertResults({
       buildCustomExcelFilename(partNo)
     );
     downloadBlob(blob, filename);
-    return { mode: 'server' as const };
   };
 
   const buildPayload = (partNo: string): RFQAutofillRequest => {
@@ -455,7 +453,30 @@ function AutoConvertResults({
       vendor_quote_mode: true,
       source: { job_id: jobId, part_summary: partSummary as any, step_metrics: null },
       tolerances: { rm_od_allowance_in: 0.10, rm_len_allowance_in: 0.35 },
-      cost_inputs: null,
+      cost_inputs: {
+        rm_rate_per_kg: 90,
+        turning_rate_per_min: 7.5,
+        vmc_rate_per_min: 7.5,
+        roughing_cost: 0,
+        inspection_cost: 10,
+        special_process_cost: 0,
+        others_cost: 0,
+        material_density_kg_m3: 7850,
+        pf_pct: 0.03,
+        oh_profit_pct: 0.20,
+        rejection_pct: 0.02,
+        exchange_rate: 82,
+        currency: 'USD',
+        use_live_rate: false,
+        qty_moq: 1,
+        annual_potential_qty: 0,
+        drawing_number: partNo,
+        part_name: llmExt?.part_name ?? null,
+        part_revision: llmExt?.revision ?? null,
+        material_grade: llmExt?.material ?? null,
+        rfq_status: 'Quoted',
+        part_type: 'Turned',
+      },
       ...(dimensionOverrides && Object.keys(dimensionOverrides).length > 0
         ? { dimension_overrides: dimensionOverrides }
         : {}),
@@ -468,8 +489,8 @@ function AutoConvertResults({
     setGenerating(true); setGenError(null); setGenStatus('Generating Excel…');
     try {
       const partNo = resolvedPartNo();
-      const { mode } = await downloadExcelForPart(partNo);
-      setGenStatus(mode === 'server' ? '✅ Excel downloaded.' : '✅ Excel downloaded.');
+      await downloadExcelForPart(partNo);
+      setGenStatus('✅ Excel downloaded.');
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Excel export failed');
       setGenStatus(null);
@@ -532,7 +553,7 @@ function AutoConvertResults({
 
     try {
       setGenStatus('Generating Excel…');
-      const { mode } = await downloadExcelForPart(partNo);
+      await downloadExcelForPart(partNo);
 
       setGenStatus('Generating STEP file…');
       await api.generateStepFromInferredStack(jobId);
@@ -546,7 +567,7 @@ function AutoConvertResults({
         await api.downloadFile(jobId, 'outputs/llm_analysis.json', `${partNo}_llm_analysis.json`, 2, 500);
       }
 
-      setGenStatus(mode === 'server' ? '✅ Excel · STEP · JSON downloaded.' : '✅ Excel · STEP · JSON downloaded.');
+      setGenStatus('✅ Excel · STEP · JSON downloaded.');
       await loadResults();
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Generation failed');

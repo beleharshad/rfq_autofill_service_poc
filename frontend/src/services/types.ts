@@ -226,10 +226,32 @@ export interface RFQAutofillRequest {
   cost_inputs?: {
     rm_rate_per_kg: number;
     turning_rate_per_min: number;
+    vmc_rate_per_min?: number;
     roughing_cost?: number;
     inspection_cost?: number;
     special_process_cost?: number | null;
+    others_cost?: number;
     material_density_kg_m3?: number;
+    pf_pct?: number;
+    oh_profit_pct?: number;
+    rejection_pct?: number;
+    exchange_rate?: number | null;
+    currency?: string;
+    use_live_rate?: boolean;
+    qty_moq?: number;
+    annual_potential_qty?: number;
+    drawing_number?: string | null;
+    part_name?: string | null;
+    part_revision?: string | null;
+    rfq_type?: string | null;
+    material_grade?: string | null;
+    material_spec?: string | null;
+    coating_spec?: string | null;
+    special_process?: string | null;
+    special_machining_process?: string | null;
+    rfq_status?: string | null;
+    part_type?: string | null;
+    part_category?: string | null;
   } | null;
   /** LLM-extracted or user-supplied dimension overrides — bypass geometry-computed values */
   dimension_overrides?: Record<string, number>;
