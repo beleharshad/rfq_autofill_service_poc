@@ -23,6 +23,43 @@ from app.services.rfq_excel_export_service import write_autofill_to_rfq_template
 
 router = APIRouter(prefix="/api/v1/rfq", tags=["rfq"])
 
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+RFQ_ESTIMATION_DIR = BACKEND_ROOT / "data" / "rfq_estimation"
+
+
+def _resolve_rfq_template_path(
+    template_filename: str,
+    template_path: Optional[str] = None,
+) -> Path:
+    """Resolve RFQ template path independent of process working directory."""
+    candidates: List[Path] = []
+
+    if template_path:
+        raw_path = Path(template_path)
+        candidates.append(raw_path)
+        if not raw_path.is_absolute():
+            candidates.extend([
+                BACKEND_ROOT / raw_path,
+                RFQ_ESTIMATION_DIR / raw_path,
+                RFQ_ESTIMATION_DIR / raw_path.name,
+            ])
+    else:
+        candidates.extend([
+            RFQ_ESTIMATION_DIR / template_filename,
+            Path("data") / "rfq_estimation" / template_filename,
+        ])
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        normalized = candidate.resolve(strict=False)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if normalized.exists() and normalized.is_file():
+            return normalized
+
+    return candidates[0].resolve(strict=False)
+
 
 def load_part_summary(job_id: str) -> Dict[str, Any]:
     """Load part_summary.json from data/jobs/{job_id}/outputs with safe path handling."""
@@ -349,13 +386,13 @@ async def rfq_autofill(
     # Auto-export Excel if enabled and cost_inputs provided
     if auto_export and cost_inputs_dict is not None:
         try:
-            template_path = Path("data") / "rfq_estimation" / template_filename
+            template_path = _resolve_rfq_template_path(template_filename)
             if template_path.exists():
                 now = datetime.utcnow()
                 date_tag = now.strftime("%d-%b%Y")
                 time_tag = now.strftime("%H%M%S")
                 safe_rfq = "".join(ch for ch in str(request.rfq_id) if ch.isalnum() or ch in ("-", "_")).strip() or "RFQ"
-                out_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
+                out_dir = RFQ_ESTIMATION_DIR / "exports" / safe_rfq
                 out_path = out_dir / f"autofill_{safe_rfq}_{date_tag}_{time_tag}.xlsx"
                 
                 write_autofill_to_rfq_template(
@@ -539,10 +576,7 @@ async def rfq_export_xlsx(
         print(f"[RFQ Export] Applied dimension_overrides: {request.dimension_overrides}")
 
     # Template can be an explicit path or a filename under backend/data/rfq_estimation/
-    if template_path:
-        template_path = Path(template_path)
-    else:
-        template_path = Path("data") / "rfq_estimation" / template_filename
+    template_path = _resolve_rfq_template_path(template_filename, template_path)
     if not template_path.exists():
         raise HTTPException(status_code=404, detail=f"Template not found: {template_path}")
 
@@ -552,7 +586,7 @@ async def rfq_export_xlsx(
     try:
         if export_mode == "master":
             # MASTER FILE MODE: Single file, update/append rows
-            master_dir = Path("data") / "rfq_estimation" / "master"
+            master_dir = RFQ_ESTIMATION_DIR / "master"
             master_filename = "RFQ-Master-2025.xlsx"
             master_path = master_dir / master_filename
             
@@ -580,7 +614,7 @@ async def rfq_export_xlsx(
                 date_tag = now.strftime("%d-%b-%Y")
                 safe_name = f"RFQ-{part_no_original}-{date_tag}.xlsx"
             
-            out_dir = Path("data") / "rfq_estimation" / "custom"
+            out_dir = RFQ_ESTIMATION_DIR / "custom"
             out_path = out_dir / safe_name
             
             # Check if the file already exists - if so, UPDATE it instead of creating fresh
@@ -613,7 +647,7 @@ async def rfq_export_xlsx(
             # COPY MODE: Create new timestamped copy each time
             date_tag = now.strftime("%d-%b%Y")
             time_tag = now.strftime("%H%M%S")
-            out_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
+            out_dir = RFQ_ESTIMATION_DIR / "exports" / safe_rfq
             out_path = out_dir / f"autofill_{safe_rfq}_{date_tag}_{time_tag}.xlsx"
             
             write_autofill_to_rfq_template(
@@ -646,7 +680,7 @@ async def rfq_list_exports(rfq_id: str) -> Dict[str, Any]:
     if not safe_rfq:
         raise HTTPException(status_code=400, detail="rfq_id is required")
 
-    base_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
+    base_dir = RFQ_ESTIMATION_DIR / "exports" / safe_rfq
     if not base_dir.exists():
         return {"rfq_id": rfq_id, "files": []}
 
@@ -678,7 +712,7 @@ async def rfq_download_export(rfq_id: str, filename: str):
     if not filename or ("/" in filename) or ("\\" in filename) or (".." in filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    base_dir = Path("data") / "rfq_estimation" / "exports" / safe_rfq
+    base_dir = RFQ_ESTIMATION_DIR / "exports" / safe_rfq
     target = (base_dir / filename)
 
     try:

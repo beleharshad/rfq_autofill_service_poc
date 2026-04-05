@@ -17,7 +17,11 @@ import {
   CorrectionsMap,
 } from './types';
 
-const API_BASE_URL = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
+const _HOSTNAME = globalThis.location?.hostname ?? '';
+const _USE_LOCAL_PROXY = _HOSTNAME === 'localhost' || _HOSTNAME === '127.0.0.1';
+const _API_ORIGIN = _USE_LOCAL_PROXY ? '' : (import.meta.env.VITE_API_URL ?? '');
+
+export const API_BASE_URL = `${_API_ORIGIN}/api/v1`;
 
 /**
  * Internal shared secret sent with every backend request as `X-API-Key`.
