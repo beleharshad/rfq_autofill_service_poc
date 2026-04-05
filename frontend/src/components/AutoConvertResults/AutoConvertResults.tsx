@@ -1,8 +1,7 @@
 // AutoConvertResults.tsx — clean single-panel UI with in-browser 3D preview
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { api, API_BASE_URL } from '../../services/api';
-import type { FileInfo, RFQAutofillRequest, CorrectionsMap, RFQAutofillResponse } from '../../services/types';
+import type { FileInfo, RFQAutofillRequest, CorrectionsMap } from '../../services/types';
 import LatheViewer from './LatheViewer';
 import { setSegments, type Segment as SegmentStoreType } from '../../state/segmentStore';
 import './AutoConvertResults.css';
@@ -31,14 +30,6 @@ interface AutoConvertResultsProps {
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
 const normalizePartNo = (s: string) => (s || '').trim().replace(/([_-])[a-zA-Z]$/, '');
-const normalizeHeader = (s: string) => (s || '').trim().toLowerCase();
-
-const RFQ_TEMPLATE_HEADER_ROW = 2;
-const RFQ_TEMPLATE_DATA_ROW = 3;
-const RFQ_TEMPLATE_URL = new URL(
-  '../../../../backend/data/rfq_estimation/RFQ-2025-01369 - R1.custom.xlsx',
-  import.meta.url
-).href;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,270 +44,6 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
-const isTemplateMissingError = (err: unknown) =>
-  err instanceof Error && /template not found/i.test(err.message);
-
-const getWorksheet = (wb: XLSX.WorkBook) => {
-  const sheetName = wb.SheetNames.includes('RFQ Details') ? 'RFQ Details' : wb.SheetNames[0];
-  return { sheetName, sheet: wb.Sheets[sheetName] };
-};
-
-const buildHeaderMap = (sheet: XLSX.WorkSheet, headerRow = RFQ_TEMPLATE_HEADER_ROW) => {
-  const headerMap = new Map<string, number>();
-  const ref = sheet['!ref'] ?? 'A1';
-  const range = XLSX.utils.decode_range(ref);
-  for (let col = range.s.c; col <= range.e.c; col += 1) {
-    const addr = XLSX.utils.encode_cell({ r: headerRow - 1, c: col });
-    const value = sheet[addr]?.v;
-    if (value == null || value === '') continue;
-    headerMap.set(normalizeHeader(String(value)), col + 1);
-  }
-  return headerMap;
-};
-
-const setCellValue = (sheet: XLSX.WorkSheet, row: number, col: number, value: string | number | boolean | null) => {
-  const origin = { r: row - 1, c: col - 1 };
-  XLSX.utils.sheet_add_aoa(sheet, [[value]], { origin });
-};
-
-const setCellFormula = (sheet: XLSX.WorkSheet, row: number, col: number, formula: string) => {
-  const addr = XLSX.utils.encode_cell({ r: row - 1, c: col - 1 });
-  const existing = sheet[addr] ?? { t: 'n' };
-  sheet[addr] = { ...existing, t: 'n', f: formula.startsWith('=') ? formula.slice(1) : formula };
-};
-
-const setByHeader = (
-  sheet: XLSX.WorkSheet,
-  headerMap: Map<string, number>,
-  header: string,
-  value: string | number | boolean | null,
-) => {
-  const col = headerMap.get(normalizeHeader(header));
-  if (!col) return;
-  setCellValue(sheet, RFQ_TEMPLATE_DATA_ROW, col, value);
-};
-
-const setFormulaByHeader = (
-  sheet: XLSX.WorkSheet,
-  headerMap: Map<string, number>,
-  header: string,
-  formula: string,
-) => {
-  const col = headerMap.get(normalizeHeader(header));
-  if (!col) return;
-  setCellFormula(sheet, RFQ_TEMPLATE_DATA_ROW, col, formula);
-};
-
-const getColumnLetter = (headerMap: Map<string, number>, header: string) => {
-  const col = headerMap.get(normalizeHeader(header));
-  return col ? XLSX.utils.encode_col(col - 1) : null;
-};
-
-const applyTemplateFormulas = (sheet: XLSX.WorkSheet, headerMap: Map<string, number>) => {
-  const r = RFQ_TEMPLATE_DATA_ROW;
-  const N = getColumnLetter(headerMap, 'Finish OD (Inch)');
-  const P = getColumnLetter(headerMap, 'Finish ID (Inch)');
-  const R = getColumnLetter(headerMap, 'Finish Length (Inch)');
-  const T = getColumnLetter(headerMap, 'RM OD (Inch)');
-  const U = getColumnLetter(headerMap, 'RM ID (Inch)');
-  const V = getColumnLetter(headerMap, 'Length (Inch)');
-  const W = getColumnLetter(headerMap, 'RM Weight Kg');
-  const X = getColumnLetter(headerMap, 'RM Rate');
-  const Y = getColumnLetter(headerMap, 'Material Cost');
-  const Z = getColumnLetter(headerMap, 'Roughing Cost');
-  const S = getColumnLetter(headerMap, 'Finish Length (MM)');
-  const AA = getColumnLetter(headerMap, 'Turning Time In Min');
-  const AB = getColumnLetter(headerMap, 'VMC Time In Min');
-  const AC = getColumnLetter(headerMap, 'Turning cost');
-  const AD = getColumnLetter(headerMap, 'VMC cost');
-  const AE = getColumnLetter(headerMap, 'Special Process Cost');
-  const AF = getColumnLetter(headerMap, 'Others');
-  const AG = getColumnLetter(headerMap, 'Inspection and testing Cost');
-  const AH = getColumnLetter(headerMap, 'Sub Total');
-  const AI = getColumnLetter(headerMap, 'P&F');
-  const AJ = getColumnLetter(headerMap, 'OH & Profit');
-  const AK = getColumnLetter(headerMap, 'Rejection Cost');
-  const AL = getColumnLetter(headerMap, 'Price/Each In INR');
-  const AM = getColumnLetter(headerMap, 'Price/Each In Currency');
-  const AQ = getColumnLetter(headerMap, 'Exchange Rate');
-  const G = getColumnLetter(headerMap, 'Annual Potential Qty');
-  const QM = getColumnLetter(headerMap, 'Qty/MOQ');
-
-  if (N) setFormulaByHeader(sheet, headerMap, 'Finish OD (MM)', `=${N}${r}*25.4`);
-  if (P) setFormulaByHeader(sheet, headerMap, 'Finish ID (MM)', `=${P}${r}*25.4`);
-  if (R) setFormulaByHeader(sheet, headerMap, 'Finish Length (MM)', `=${R}${r}*25.4`);
-  if (N) setFormulaByHeader(sheet, headerMap, 'RM OD (Inch)', `=ROUND(${N}${r}+0.1,3)`);
-  if (P) setFormulaByHeader(sheet, headerMap, 'RM ID (Inch)', `=IF(${P}${r}>0,ROUND(MAX(0,${P}${r}-0.05),3),0)`);
-  if (R) setFormulaByHeader(sheet, headerMap, 'Length (Inch)', `=${R}${r}+0.35`);
-
-  if (T && V && U) {
-    setFormulaByHeader(
-      sheet,
-      headerMap,
-      'RM Weight Kg',
-      `=(((${T}${r}*25.4)*(${T}${r}*25.4)*(${V}${r}*25.4)*0.785*7.86)/1000000)-(((${U}${r}*25.4)*(${U}${r}*25.4)*(${V}${r}*25.4)*0.785*7.86)/1000000)`
-    );
-  } else if (T && V) {
-    setFormulaByHeader(
-      sheet,
-      headerMap,
-      'RM Weight Kg',
-      `=(((${T}${r}*25.4)*(${T}${r}*25.4)*(${V}${r}*25.4)*0.785*7.86)/1000000)`
-    );
-  }
-
-  if (X && W) setFormulaByHeader(sheet, headerMap, 'Material Cost', `=${X}${r}*${W}${r}`);
-  if (S) setFormulaByHeader(sheet, headerMap, 'Roughing Cost', `=${S}${r}*1.5`);
-  if (S) setFormulaByHeader(sheet, headerMap, 'Turning Time In Min', `=(${S}${r}*10/40)`);
-  if (AA) setFormulaByHeader(sheet, headerMap, 'Turning cost', `=${AA}${r}*7.5`);
-  if (AB) setFormulaByHeader(sheet, headerMap, 'VMC cost', `=${AB}${r}*7.5`);
-
-  const subParts = [AG, AF, AE, AD, AC, Z, Y].filter(Boolean);
-  if (subParts.length > 0) {
-    setFormulaByHeader(sheet, headerMap, 'Sub Total', `=(SUM(${subParts.map((col) => `${col}${r}`).join('+')}))`);
-  }
-  if (AH) {
-    setFormulaByHeader(sheet, headerMap, 'P&F', `=${AH}${r}*3%`);
-    setFormulaByHeader(sheet, headerMap, 'OH & Profit', `=${AH}${r}*15%`);
-    setFormulaByHeader(sheet, headerMap, 'Rejection Cost', `=${AH}${r}*2%`);
-  }
-
-  const inrParts = [AK, AJ, AI, AH].filter(Boolean);
-  if (inrParts.length > 0) {
-    setFormulaByHeader(sheet, headerMap, 'Price/Each In INR', `=SUM(${inrParts.map((col) => `${col}${r}`).join('+')})`);
-  }
-  if (AL && AQ) setFormulaByHeader(sheet, headerMap, 'Price/Each In Currency', `=(${AL}${r}/${AQ}${r})`);
-  if (AM && G) setFormulaByHeader(sheet, headerMap, 'Annual Potential', `=${AM}${r}*${G}${r}`);
-  if (Y && AL) setFormulaByHeader(sheet, headerMap, 'RM Contribution %', `=${Y}${r}/${AL}${r}*100`);
-  if (AM && QM) setFormulaByHeader(sheet, headerMap, 'MOQ Cost', `=${AM}${r}*${QM}${r}`);
-};
-
-const flattenObjectEntries = (value: unknown, prefix = ''): Array<[string, string | number | boolean | null]> => {
-  if (value == null) return [];
-  if (typeof value !== 'object') {
-    return [[prefix || 'value', value as string | number | boolean | null]];
-  }
-
-  if (Array.isArray(value)) {
-    return [[prefix || 'value', JSON.stringify(value)]];
-  }
-
-  return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => {
-    const nextKey = prefix ? `${prefix}.${key}` : key;
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      return flattenObjectEntries(nested, nextKey);
-    }
-    return [[nextKey, Array.isArray(nested) ? JSON.stringify(nested) : (nested as string | number | boolean | null) ?? null]];
-  });
-};
-
-const buildFallbackExcelBlob = (params: {
-  jobId: string;
-  partNo: string;
-  partSummary: any;
-  llmAnalysis: any;
-  dims: ReturnType<typeof effectiveDims>;
-}) => {
-  const { jobId, partNo, partSummary, llmAnalysis, dims } = params;
-  const wb = XLSX.utils.book_new();
-
-  const summaryRows = [
-    ['Field', 'Value'],
-    ['Part No', partNo],
-    ['Job ID', jobId],
-    ['Generated At (UTC)', new Date().toISOString()],
-    ['Finish OD (in)', dims.od_in],
-    ['Max OD (in)', dims.max_od_in],
-    ['Finish ID (in)', dims.id_in],
-    ['Finish Length (in)', dims.length_in],
-    ['LLM Recommendation', llmAnalysis?.validation?.recommendation ?? ''],
-    ['LLM Confidence', llmAnalysis?.validation?.overall_confidence ?? ''],
-    ['Material', llmAnalysis?.extracted?.material ?? partSummary?.material ?? ''],
-    ['Source', 'Browser fallback export'],
-  ];
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
-  summarySheet['!cols'] = [{ wch: 28 }, { wch: 42 }];
-  XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
-
-  const segmentRows = (partSummary?.segments || []).map((segment: any, index: number) => ({
-    index: index + 1,
-    z_start: segment?.z_start ?? '',
-    z_end: segment?.z_end ?? '',
-    od_diameter: segment?.od_diameter ?? '',
-    id_diameter: segment?.id_diameter ?? '',
-    confidence: segment?.confidence ?? '',
-    flags: Array.isArray(segment?.flags) ? segment.flags.join(', ') : '',
-  }));
-  const segmentsSheet = XLSX.utils.json_to_sheet(
-    segmentRows.length > 0 ? segmentRows : [{ note: 'No segment data available' }]
-  );
-  XLSX.utils.book_append_sheet(wb, segmentsSheet, 'Segments');
-
-  const llmRows = flattenObjectEntries(llmAnalysis?.extracted).map(([field, value]) => ({ field, value }));
-  const llmSheet = XLSX.utils.json_to_sheet(
-    llmRows.length > 0 ? llmRows : [{ field: 'note', value: 'No LLM analysis available' }]
-  );
-  XLSX.utils.book_append_sheet(wb, llmSheet, 'LLM Extracted');
-
-  const partSummaryRows = flattenObjectEntries(partSummary).map(([field, value]) => ({ field, value }));
-  const partSummarySheet = XLSX.utils.json_to_sheet(
-    partSummaryRows.length > 0 ? partSummaryRows : [{ field: 'note', value: 'No part summary available' }]
-  );
-  XLSX.utils.book_append_sheet(wb, partSummarySheet, 'Part Summary');
-
-  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  return new Blob([bytes], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
-};
-
-const buildTemplateExcelBlob = async (params: {
-  partNo: string;
-  llmAnalysis: any;
-  autofill: RFQAutofillResponse;
-}) => {
-  const { partNo, llmAnalysis, autofill } = params;
-  const response = await globalThis.fetch(RFQ_TEMPLATE_URL);
-  if (!response.ok) {
-    throw new Error('Unable to load RFQ template');
-  }
-
-  const templateBytes = await response.arrayBuffer();
-  const wb = XLSX.read(templateBytes, { type: 'array', cellStyles: true, cellNF: true, cellFormula: true });
-  const { sheet } = getWorksheet(wb);
-  const headerMap = buildHeaderMap(sheet);
-  const estimate = (autofill as any)?.estimate ?? {};
-  const estimateValue = (key: string) => estimate?.[key]?.value ?? null;
-
-  setByHeader(sheet, headerMap, 'Sr.No', 1);
-  setByHeader(sheet, headerMap, 'Part No', partNo);
-  setByHeader(sheet, headerMap, 'Drawing Number', partNo);
-  setByHeader(sheet, headerMap, 'Part Name', llmAnalysis?.extracted?.part_name ?? '');
-  setByHeader(sheet, headerMap, 'Part Revision', llmAnalysis?.extracted?.revision ?? '');
-  setByHeader(sheet, headerMap, 'Material Grade', llmAnalysis?.extracted?.material ?? '');
-  setByHeader(sheet, headerMap, 'RFQ Status', 'Open');
-  setByHeader(sheet, headerMap, 'Part Type', 'Turned');
-  setByHeader(sheet, headerMap, 'Currency', 'USD');
-
-  setByHeader(sheet, headerMap, 'Finish OD (Inch)', autofill.fields?.finish_od_in?.value ?? null);
-  setByHeader(sheet, headerMap, 'Finish ID (Inch)', autofill.fields?.finish_id_in?.value ?? null);
-  setByHeader(sheet, headerMap, 'Finish Length (Inch)', autofill.fields?.finish_len_in?.value ?? null);
-  setByHeader(sheet, headerMap, 'RM Rate', estimateValue('rm_rate_per_kg'));
-  setByHeader(sheet, headerMap, 'VMC Time In Min', estimateValue('vmc_minutes'));
-  setByHeader(sheet, headerMap, 'Special Process Cost', estimateValue('special_process_cost'));
-  setByHeader(sheet, headerMap, 'Others', estimateValue('others_cost'));
-  setByHeader(sheet, headerMap, 'Inspection and testing Cost', estimateValue('inspection_cost'));
-  setByHeader(sheet, headerMap, 'Exchange Rate', estimateValue('exchange_rate_used'));
-  setByHeader(sheet, headerMap, 'Annual Potential Qty', llmAnalysis?.extracted?.quantity ?? null);
-  setByHeader(sheet, headerMap, 'Qty/MOQ', llmAnalysis?.extracted?.quantity ?? null);
-
-  applyTemplateFormulas(sheet, headerMap);
-
-  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
-  return new Blob([bytes], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
-};
 
 /** Merge LLM extracted dims with optional user overrides (null = use LLM). */
 export function effectiveDims(
@@ -697,34 +424,13 @@ function AutoConvertResults({
   const buildCustomExcelFilename = (partNo: string) => `RFQ-${normalizePartNo(partNo)}`;
 
   const downloadExcelForPart = async (partNo: string) => {
-    try {
-      const { blob, filename } = await api.rfqExportXlsx(
-        buildPayload(partNo),
-        'new_file',
-        buildCustomExcelFilename(partNo)
-      );
-      downloadBlob(blob, filename);
-      return { mode: 'server' as const };
-    } catch (err) {
-      if (!isTemplateMissingError(err)) throw err;
-
-      try {
-        const autofill = await api.rfqAutofill(buildPayload(partNo));
-        const blob = await buildTemplateExcelBlob({ partNo, llmAnalysis, autofill });
-        downloadBlob(blob, `${buildCustomExcelFilename(partNo)}.xlsx`);
-        return { mode: 'template' as const };
-      } catch {
-        const blob = buildFallbackExcelBlob({
-          jobId,
-          partNo,
-          partSummary,
-          llmAnalysis,
-          dims: effectiveDims(llmAnalysis, { od: odOvr, maxOd: maxOdOvr, id: idOvr, len: lenOvr }),
-        });
-        downloadBlob(blob, `${buildCustomExcelFilename(partNo)}.xlsx`);
-        return { mode: 'summary' as const };
-      }
-    }
+    const { blob, filename } = await api.rfqExportXlsx(
+      buildPayload(partNo),
+      'new_file',
+      buildCustomExcelFilename(partNo)
+    );
+    downloadBlob(blob, filename);
+    return { mode: 'server' as const };
   };
 
   const buildPayload = (partNo: string): RFQAutofillRequest => {
@@ -763,7 +469,7 @@ function AutoConvertResults({
     try {
       const partNo = resolvedPartNo();
       const { mode } = await downloadExcelForPart(partNo);
-      setGenStatus(mode === 'template' ? '✅ Template Excel downloaded.' : mode === 'summary' ? '✅ Sample Excel downloaded.' : '✅ Excel downloaded.');
+      setGenStatus(mode === 'server' ? '✅ Excel downloaded.' : '✅ Excel downloaded.');
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Excel export failed');
       setGenStatus(null);
@@ -840,7 +546,7 @@ function AutoConvertResults({
         await api.downloadFile(jobId, 'outputs/llm_analysis.json', `${partNo}_llm_analysis.json`, 2, 500);
       }
 
-      setGenStatus(mode === 'template' ? '✅ Template Excel · STEP · JSON downloaded.' : mode === 'summary' ? '✅ Sample Excel · STEP · JSON downloaded.' : '✅ Excel · STEP · JSON downloaded.');
+      setGenStatus(mode === 'server' ? '✅ Excel · STEP · JSON downloaded.' : '✅ Excel · STEP · JSON downloaded.');
       await loadResults();
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Generation failed');
