@@ -34,6 +34,11 @@ _ALLOWED_EXT = {".pdf", ".zip", ".step", ".stp"}
 _MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB per file
 
 
+def _auto_convert_requires_source_file(mode: Optional[str]) -> bool:
+    """Return True when *mode* requires at least one uploaded source file."""
+    return (mode or "").strip() == "auto_convert"
+
+
 def _validate_upload(file: UploadFile) -> None:
     """Raise 400/413 if *file* has a disallowed extension or exceeds the size limit."""
     name = (file.filename or "").lower()
@@ -68,12 +73,19 @@ async def create_job(
     Files are optional - job can be created without files for later upload.
     Returns job with status CREATED and list of input files.
     """
+    job_id: Optional[str] = None
     try:
         # Validate and sanitise text inputs
         if name:
             name = name[:200].strip()
         if description:
             description = description[:1000].strip()
+
+        if _auto_convert_requires_source_file(mode) and not files:
+            raise HTTPException(
+                status_code=400,
+                detail="Auto Convert jobs require at least one PDF, ZIP, STEP, or STP file.",
+            )
 
         # Validate each uploaded file before creating the job
         for f in (files or []):
@@ -83,6 +95,12 @@ async def create_job(
 
         if files and len(files) > 0:
             job = job_service.upload_files(job_id, files)
+            if _auto_convert_requires_source_file(mode) and not job.input_files:
+                job_service.delete_job(job_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Auto Convert job upload did not contain any accepted source files. Please upload a PDF, ZIP, STEP, or STP file and try again.",
+                )
         else:
             job = job_service.get_job(job_id)
 
