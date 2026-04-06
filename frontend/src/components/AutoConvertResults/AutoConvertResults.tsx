@@ -515,7 +515,7 @@ function AutoConvertResults({
       part_no: partNo,
       mode: 'ENVELOPE',
       vendor_quote_mode: true,
-      source: { job_id: jobId, part_summary: partSummary as any, step_metrics: null },
+      source: { job_id: jobId, part_summary: null, step_metrics: null },
       tolerances: { rm_od_allowance_in: 0.10, rm_len_allowance_in: 0.35 },
       cost_inputs: {
         rm_rate_per_kg: 90,

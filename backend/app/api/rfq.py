@@ -110,6 +110,28 @@ def load_part_summary(job_id: str) -> Dict[str, Any]:
     return data
 
 
+def _resolve_request_part_summary(source: Any) -> Dict[str, Any]:
+    """Resolve the part summary to use for RFQ operations.
+
+    When both `job_id` and an inline `part_summary` are present, prefer the
+    canonical `outputs/part_summary.json` for that job. The browser can hold a
+    partial/stale summary object that omits STEP feature counts, which causes
+    drilling/VMC estimates to collapse to zero during export.
+    """
+    inline_summary = getattr(source, "part_summary", None)
+    job_id = getattr(source, "job_id", None)
+
+    if job_id is not None:
+        return load_part_summary(job_id)
+
+    if inline_summary is not None:
+        if not isinstance(inline_summary, dict):
+            raise HTTPException(status_code=400, detail="source.part_summary must be a JSON object")
+        return inline_summary
+
+    raise HTTPException(status_code=400, detail="Either source.part_summary or source.job_id is required")
+
+
 @router.post("/autofill", response_model=RFQAutofillResponse)
 async def rfq_autofill(
     request: RFQAutofillRequest,
@@ -127,15 +149,7 @@ async def rfq_autofill(
     part_no_original = request.part_no.strip()
     _part_no_key = part_no_original.lower()  # v1: internal comparisons should be case-insensitive
 
-    part_summary: Optional[Dict[str, Any]] = None
-    if request.source.part_summary is not None:
-        if not isinstance(request.source.part_summary, dict):
-            raise HTTPException(status_code=400, detail="source.part_summary must be a JSON object")
-        part_summary = request.source.part_summary
-    elif request.source.job_id is not None:
-        part_summary = load_part_summary(request.source.job_id)
-    else:
-        raise HTTPException(status_code=400, detail="Either source.part_summary or source.job_id is required")
+    part_summary: Dict[str, Any] = _resolve_request_part_summary(request.source)
 
     # Auto-populate metadata from job if not provided
     cost_inputs_dict = request.cost_inputs.model_dump() if request.cost_inputs is not None else None
@@ -477,15 +491,7 @@ async def rfq_export_xlsx(
 
     part_no_original = request.part_no.strip()
 
-    part_summary: Optional[Dict[str, Any]] = None
-    if request.source.part_summary is not None:
-        if not isinstance(request.source.part_summary, dict):
-            raise HTTPException(status_code=400, detail="source.part_summary must be a JSON object")
-        part_summary = request.source.part_summary
-    elif request.source.job_id is not None:
-        part_summary = load_part_summary(request.source.job_id)
-    else:
-        raise HTTPException(status_code=400, detail="Either source.part_summary or source.job_id is required")
+    part_summary: Dict[str, Any] = _resolve_request_part_summary(request.source)
 
     # Auto-populate metadata from job if not provided (same logic as /autofill)
     cost_inputs_dict = request.cost_inputs.model_dump() if request.cost_inputs is not None else None
