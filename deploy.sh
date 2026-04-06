@@ -19,6 +19,7 @@ FRONTEND_DIR="$REPO_DIR/frontend"
 VENV="$BACKEND_DIR/venv"
 BACKEND_SERVICE="${BACKEND_SERVICE:-rfq-backend}"   # override: BACKEND_SERVICE=my-svc ./deploy.sh
 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+LIVE_FRONTEND_DIR="${LIVE_FRONTEND_DIR:-/opt/rfq/frontend/dist}"
 
 echo "==> [1/5] Pulling latest code from master…"
 cd "$REPO_DIR"
@@ -34,6 +35,14 @@ npm install --silent
 export NODE_OPTIONS
 echo "    Using NODE_OPTIONS=$NODE_OPTIONS"
 npm run build
+
+if [ -d "$LIVE_FRONTEND_DIR" ]; then
+    echo "    Publishing frontend assets to $LIVE_FRONTEND_DIR"
+    rm -rf "$LIVE_FRONTEND_DIR"/*
+    cp -r "$FRONTEND_DIR/dist"/* "$LIVE_FRONTEND_DIR"/
+else
+    echo "    NOTE: Live frontend dir '$LIVE_FRONTEND_DIR' not found; skipping publish copy."
+fi
 
 echo "==> [4/5] Restarting backend service ($BACKEND_SERVICE)…"
 if systemctl is-active --quiet "$BACKEND_SERVICE" 2>/dev/null; then
