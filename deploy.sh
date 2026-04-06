@@ -18,6 +18,7 @@ BACKEND_DIR="$REPO_DIR/backend"
 FRONTEND_DIR="$REPO_DIR/frontend"
 VENV="$BACKEND_DIR/venv"
 BACKEND_SERVICE="${BACKEND_SERVICE:-rfq-backend}"   # override: BACKEND_SERVICE=my-svc ./deploy.sh
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 
 echo "==> [1/5] Pulling latest code from master…"
 cd "$REPO_DIR"
@@ -30,6 +31,8 @@ echo "==> [2/5] Installing / upgrading backend Python deps…"
 echo "==> [3/5] Building frontend…"
 cd "$FRONTEND_DIR"
 npm install --silent
+export NODE_OPTIONS
+echo "    Using NODE_OPTIONS=$NODE_OPTIONS"
 npm run build
 
 echo "==> [4/5] Restarting backend service ($BACKEND_SERVICE)…"
