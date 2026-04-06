@@ -2346,8 +2346,12 @@ class RFQAutofillService:
             return None, False
 
         features = part_summary.get("features")
-        if isinstance(features, dict) and features:
-            return features, False
+        existing_features = features if isinstance(features, dict) else None
+        if existing_features:
+            has_explicit_holes = isinstance(existing_features.get("holes"), list) and bool(existing_features.get("holes"))
+            has_explicit_slots = isinstance(existing_features.get("slots"), list) and bool(existing_features.get("slots"))
+            if has_explicit_holes or has_explicit_slots:
+                return existing_features, False
 
         feature_counts = part_summary.get("feature_counts") or {}
         if not feature_counts:
@@ -2407,6 +2411,18 @@ class RFQAutofillService:
                 "internal_bore_count": internal_bores,
             },
         }
+
+        if existing_features:
+            merged_features = dict(existing_features)
+            merged_features["holes"] = proxy_features["holes"]
+            merged_meta = dict(existing_features.get("meta") or {})
+            merged_meta.update(proxy_features["meta"])
+            merged_features["meta"] = merged_meta
+            for key in ("slots", "chamfers", "fillets", "threads"):
+                if key not in merged_features:
+                    merged_features[key] = proxy_features.get(key, [])
+            return merged_features, True
+
         return proxy_features, True
 
     def _calculate_drilling_time(self, features: Dict[str, Any], rm_len: float) -> float:
