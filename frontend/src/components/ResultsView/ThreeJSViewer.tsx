@@ -279,6 +279,7 @@ function GlbFitCamera({
 
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
 
     const axes = [
       { axis: 'x' as const, size: size.x, min: box.min.x, max: box.max.x },
@@ -287,23 +288,9 @@ function GlbFitCamera({
     ].sort((a, b) => b.size - a.size);
 
     const longestAxis = axes[0].axis;
-    const shortestAxis = axes[2].axis;
-
-    // For arbitrary STEP solids, the most complete presentation is usually
-    // looking along the SHORTEST axis so the two largest extents fill the view.
-    // Keep longest-axis viewing only for the explicit ID preset.
-    const viewAxis = preset === 'id' ? longestAxis : shortestAxis;
-    const visibleAxes = (['x', 'y', 'z'] as const).filter((axis) => axis !== viewAxis);
-    const visibleSizeA = size[visibleAxes[0]];
-    const visibleSizeB = size[visibleAxes[1]];
-    const depthSize = size[viewAxis];
 
     const fovRad = 18 * Math.PI / 180;
-    const halfA = visibleSizeA / 2;
-    const halfB = visibleSizeB / 2;
-    const halfDepth = depthSize / 2;
-    const sceneSphere = Math.sqrt(halfA ** 2 + (halfB * 1.05) ** 2 + halfDepth ** 2);
-    const dist = (sceneSphere / Math.tan(fovRad)) * 1.12;
+    const dist = (sphere.radius / Math.sin(fovRad)) * 1.08;
 
     const axisVector = (axis: 'x' | 'y' | 'z', amount: number) =>
       axis === 'x'
@@ -312,32 +299,25 @@ function GlbFitCamera({
         ? new THREE.Vector3(0, amount, 0)
         : new THREE.Vector3(0, 0, amount);
 
+    const diagonal = (x: number, y: number, z: number, scale = 1.0) =>
+      new THREE.Vector3(x, y, z).normalize().multiplyScalar(dist * scale);
+
     let camPos = center.clone();
     if (preset === 'id') {
-      camPos.add(axisVector(viewAxis, dist));
+      camPos.add(axisVector(longestAxis, dist));
     } else if (preset === 'od') {
-      camPos.add(axisVector(viewAxis, dist));
+      camPos.add(diagonal(1.15, 0.18, 0.72, 1.0));
     } else if (preset === 'section') {
-      camPos
-        .add(axisVector(viewAxis, dist * 0.94))
-        .add(axisVector(visibleAxes[0], dist * 0.26))
-        .add(axisVector(visibleAxes[1], dist * 0.16));
+      camPos.add(diagonal(0.92, 0.74, 1.04, 1.03));
     } else if (preset === 'xray') {
-      camPos
-        .add(axisVector(viewAxis, dist * 0.92))
-        .add(axisVector(visibleAxes[0], dist * 0.22))
-        .add(axisVector(visibleAxes[1], dist * 0.10));
+      camPos.add(diagonal(1.02, 0.42, 1.08, 1.0));
     } else {
-      // Full: face-on to shortest axis with a mild 3/4 lift.
-      camPos
-        .add(axisVector(viewAxis, dist * 0.96))
-        .add(axisVector(visibleAxes[0], dist * 0.18))
-        .add(axisVector(visibleAxes[1], dist * 0.12));
+      // Full: stable isometric corner view for arbitrary uploaded STEP solids.
+      camPos.add(diagonal(1.06, 0.52, 1.0, 1.0));
     }
 
-    // Keep camera roll stable by choosing an up vector from one visible axis.
-    const upAxis = visibleAxes.includes('y') ? 'y' : visibleAxes[0];
-    camera.up.copy(axisVector(upAxis, 1));
+    // Keep camera roll stable.
+    camera.up.set(0, 1, 0);
 
     camera.position.copy(camPos);
     camera.lookAt(center);
