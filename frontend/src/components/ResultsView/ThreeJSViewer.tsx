@@ -209,6 +209,7 @@ interface GlbModelProps {
   viewMode: ViewMode;
   cameraPreset: CameraPreset;
   cameraVersion: number;
+  dims: ViewerDimensions;
 }
 
 /**
@@ -221,10 +222,12 @@ function GlbFitCamera({
   scene,
   preset,
   version,
+  dims,
 }: {
   scene: THREE.Object3D;
   preset: CameraPreset;
   version: number;
+  dims: ViewerDimensions;
 }) {
   const { camera, controls } = useThree();
   // Re-run whenever version changes (user clicked a preset button or reset)
@@ -241,20 +244,36 @@ function GlbFitCamera({
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
-    // Determine which world axis is the turning / longest axis
-    const longest = Math.max(size.x, size.y, size.z);
-    const isXLongest = size.x >= size.y && size.x >= size.z;
-    const isYLongest = !isXLongest && size.y >= size.z;
-    // isZLongest is the fallthrough
+    // Determine the turning axis by comparing the GLB bbox against the
+    // extracted part dimensions. "Longest axis" is not reliable because some
+    // parts are wider than they are long, so the OD can be larger than length.
+    const expectedLength = Math.max(dims.length ?? 0, 0.001);
+    const expectedOd = Math.max(dims.maxOd ?? (dims.maxRadius * 2), 0.001);
+    const axisCandidates = [
+      { axis: 'x' as const, length: size.x, crossA: size.y, crossB: size.z },
+      { axis: 'y' as const, length: size.y, crossA: size.x, crossB: size.z },
+      { axis: 'z' as const, length: size.z, crossA: size.x, crossB: size.y },
+    ];
 
-    const maxCross = isXLongest
-      ? Math.max(size.y, size.z)
-      : isYLongest
-      ? Math.max(size.x, size.z)
-      : Math.max(size.x, size.y);
+    const bestAxis = axisCandidates
+      .map((candidate) => {
+        const crossMax = Math.max(candidate.crossA, candidate.crossB);
+        const crossMin = Math.min(candidate.crossA, candidate.crossB);
+        const lengthScore = Math.abs(candidate.length - expectedLength) / expectedLength;
+        const odScore = Math.abs(crossMax - expectedOd) / expectedOd;
+        const roundScore = Math.abs(candidate.crossA - candidate.crossB) / Math.max(crossMax, 0.001);
+        // Prefer an axis whose other two spans are similar (round cross-section).
+        const score = lengthScore * 1.4 + odScore + roundScore * 0.8 + (crossMin / Math.max(crossMax, 0.001) < 0.55 ? 0.6 : 0);
+        return { ...candidate, crossMax, score };
+      })
+      .sort((a, b) => a.score - b.score)[0];
+
+    const turningAxis = bestAxis.axis;
+    const axisLength = bestAxis.length;
+    const maxCross = bestAxis.crossMax;
 
     const fovRad = 18 * Math.PI / 180;
-    const halfLen = longest / 2;
+    const halfLen = axisLength / 2;
     const halfCross = maxCross / 2;
     const sceneSphere = Math.sqrt(halfLen ** 2 + (halfCross * 1.9) ** 2 + halfCross ** 2);
     const dist = (sceneSphere / Math.tan(fovRad)) * 1.12;
@@ -264,20 +283,20 @@ function GlbFitCamera({
     const side = (preset === 'od') ? 1.0 : 0.9;
 
     if (preset === 'id') {
-      // End-on: look along the longest (turning) axis from the near end
-      if (isXLongest) {
+      // End-on: look along the inferred turning axis from the near end
+      if (turningAxis === 'x') {
         camPos = new THREE.Vector3(box.min.x - dist, center.y, center.z);
-      } else if (isYLongest) {
+      } else if (turningAxis === 'y') {
         camPos = new THREE.Vector3(center.x, box.min.y - dist, center.z);
       } else {
         camPos = new THREE.Vector3(center.x, center.y, box.min.z - dist);
       }
     } else {
-      // Side-profile: camera is PERPENDICULAR to the longest (turning) axis
-      if (isXLongest) {
+      // Side-profile: camera is PERPENDICULAR to the inferred turning axis
+      if (turningAxis === 'x') {
         // X is the turning axis → look from ±Z side
         camPos = new THREE.Vector3(center.x, center.y + dist * elev, center.z - dist * side);
-      } else if (isYLongest) {
+      } else if (turningAxis === 'y') {
         // Y is the turning axis → look from ±X/Z side
         camPos = new THREE.Vector3(center.x - dist * side, center.y, center.z - dist * elev);
       } else {
@@ -300,7 +319,7 @@ function GlbFitCamera({
       orbit.update();
       orbit.enableDamping = wasEnabled;
     }
-  }, [scene, preset, version, camera, controls]);
+  }, [scene, preset, version, camera, controls, dims.length, dims.maxOd, dims.maxRadius]);
 
   return null;
 }
@@ -651,7 +670,7 @@ function SceneCameraDriver({ position, target, version }: SceneCameraDriverProps
   return null;
 }
 
-function GlbModel({ url, viewMode, cameraPreset, cameraVersion }: GlbModelProps) {
+function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModelProps) {
   const gltf = useLoader(GLTFLoader, url);
   
   // Traverse the scene and update materials based on view mode
@@ -779,7 +798,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion }: GlbModelProps)
   return (
     <>
       <primitive object={gltf.scene} />
-      <GlbFitCamera scene={gltf.scene} preset={cameraPreset} version={cameraVersion} />
+      <GlbFitCamera scene={gltf.scene} preset={cameraPreset} version={cameraVersion} dims={dims} />
     </>
   );
 }
@@ -1301,7 +1320,7 @@ function Scene({
       {/* Render GLB model if available, otherwise procedural */}
       {glbUrl ? (
         <Suspense fallback={null}>
-          <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} />
+          <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} dims={getViewerDimensions(summary)} />
         </Suspense>
       ) : !forceGlbOnly ? (
         summary.segments.map((segment, index) => (
