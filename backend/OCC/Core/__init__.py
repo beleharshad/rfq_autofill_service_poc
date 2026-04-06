@@ -26,6 +26,7 @@ class _OcpAliasLoader(importlib.abc.Loader):
 
     def create_module(self, spec):  # type: ignore[override]
         module = importlib.import_module(self.target_name)
+        _apply_compat_aliases(module, self.target_name)
         sys.modules[self.fullname] = module
         return module
 
@@ -54,3 +55,20 @@ if not any(isinstance(finder, _OcpAliasFinder) for finder in sys.meta_path):
 
 def __getattr__(name: str):
     return importlib.import_module(f"{_PREFIX}.{name}")
+
+
+def _apply_compat_aliases(module: ModuleType, target_name: str) -> None:
+    """Patch small API naming differences between pythonocc and OCP."""
+    if target_name != "OCP.BRepBndLib":
+        return
+
+    cls = getattr(module, "BRepBndLib", None)
+    add_func = getattr(cls, "Add", None) or getattr(cls, "Add_s", None)
+    if add_func is None:
+        return
+
+    if not hasattr(module, "brepbndlib_Add"):
+        module.brepbndlib_Add = add_func
+
+    if cls is not None and not hasattr(cls, "Add"):
+        setattr(cls, "Add", add_func)
