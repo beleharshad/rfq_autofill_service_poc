@@ -288,8 +288,8 @@ function GlbFitCamera({
 
     camera.position.copy(camPos);
     camera.lookAt(center);
-    camera.near = Math.max(dist * 0.001, 0.001);
-    camera.far = dist * 20;
+    camera.near = Math.max(dist * 0.0001, 0.0002);
+    camera.far = dist * 25;
     camera.updateProjectionMatrix();
 
     if (controls) {
@@ -658,6 +658,9 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion }: GlbModelProps)
   useEffect(() => {
     gltf.scene.traverse((child: any) => {
       if (child.isMesh) {
+        // Disable frustum culling so no part of the model gets clipped
+        // when the camera is close or the bounding sphere is off-centre.
+        child.frustumCulled = false;
         child.castShadow = viewMode === 'realistic';
         child.receiveShadow = viewMode === 'realistic';
 
