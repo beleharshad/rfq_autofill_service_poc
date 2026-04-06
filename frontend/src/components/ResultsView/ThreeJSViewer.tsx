@@ -1779,7 +1779,7 @@ function ThreeJSViewer({
           style={{ background: VIEWER_BG }}
         >
           <color attach="background" args={[VIEWER_BG]} />
-          {renderViewMode !== 'xray' && <fog attach="fog" args={[VIEWER_BG, cameraDistance * 1.8, cameraDistance * 7]} />}
+          {!glbUrl && renderViewMode !== 'xray' && <fog attach="fog" args={[VIEWER_BG, cameraDistance * 1.8, cameraDistance * 7]} />}
           <PerspectiveCamera
             makeDefault
             position={cameraPosition}
