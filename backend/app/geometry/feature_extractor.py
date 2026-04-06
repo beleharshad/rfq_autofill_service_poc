@@ -639,6 +639,11 @@ class FeatureExtractor:
             if len(debug_cyl_faces) != len(classified_faces.cylindrical):
                 print(f"DEBUG: WARNING - Mismatch between direct count and classified count!")
             print()
+
+        # When STEP bodies are not aligned to world Z, a fixed Z reference axis makes
+        # axial extents unreliable and the turned-stack builder can collapse to an empty
+        # result. Infer the dominant revolution axis from the detected cylindrical faces.
+        self._infer_reference_axis_from_cylinders(solid, classified_faces.cylindrical)
         
         # Detect holes (internal cylindrical features)
         holes = self._detect_holes(solid, classified_faces.cylindrical, debug_cyl_faces if self._debug else [])
@@ -654,6 +659,40 @@ class FeatureExtractor:
             if self._debug:
                 print(f"DEBUG: Exception in _detect_cylinders: {e}")
             collection.cylinders = []
+
+        if classified_faces.cylindrical and not collection.holes and not collection.cylinders:
+            if self._debug:
+                print("DEBUG: No cylindrical features recovered on first pass; retrying with radius fallback")
+
+            original_use_radius_fallback = self._use_radius_fallback
+            try:
+                self._use_radius_fallback = True
+                retry_holes = self._detect_holes(solid, classified_faces.cylindrical, debug_cyl_faces if self._debug else [])
+                retry_cylinders = self._detect_cylinders(solid, classified_faces.cylindrical, debug_cyl_faces if self._debug else []) or []
+            except Exception as e:
+                if self._debug:
+                    print(f"DEBUG: Retry with radius fallback failed: {e}")
+                retry_holes = []
+                retry_cylinders = []
+            finally:
+                self._use_radius_fallback = original_use_radius_fallback
+
+            if retry_holes or retry_cylinders:
+                collection.holes = retry_holes
+                collection.cylinders = retry_cylinders
+            else:
+                fallback_holes, fallback_cylinders = self._recover_cylindrical_features_from_geometry(
+                    solid,
+                    classified_faces.cylindrical,
+                )
+                if fallback_holes or fallback_cylinders:
+                    if self._debug:
+                        print(
+                            "DEBUG: Geometry-only cylindrical recovery produced "
+                            f"{len(fallback_holes)} holes and {len(fallback_cylinders)} cylinders"
+                        )
+                    collection.holes = fallback_holes
+                    collection.cylinders = fallback_cylinders
         
         # Step 2: Compare counts
         if self._debug:
@@ -1295,6 +1334,43 @@ class FeatureExtractor:
                 pass
             
             exp.Next()
+
+        # Cylindrical and revolved faces imported from STEP often expose seam-only
+        # topological vertices, which collapses the projected span to a single point.
+        # Sample interior UV locations so the axial extent reflects the true trimmed face.
+        try:
+            adaptor = BRepAdaptor_Surface(face, True)
+            u_first = adaptor.FirstUParameter()
+            u_last = adaptor.LastUParameter()
+            v_first = adaptor.FirstVParameter()
+            v_last = adaptor.LastVParameter()
+
+            def _pick_params(first: float, last: float) -> List[float]:
+                if not math.isfinite(first) or not math.isfinite(last):
+                    return [0.0]
+                if abs(last - first) <= self.tolerance:
+                    return [first]
+                mid = (first + last) / 2.0
+                quarter = first + (last - first) * 0.25
+                three_quarter = first + (last - first) * 0.75
+                return [first, quarter, mid, three_quarter, last]
+
+            surface = adaptor.Surface().Surface()
+            seen_params = set()
+            for u in _pick_params(u_first, u_last):
+                for v in _pick_params(v_first, v_last):
+                    key = (round(float(u), 9), round(float(v), 9))
+                    if key in seen_params:
+                        continue
+                    seen_params.add(key)
+                    try:
+                        props = GeomLProp_SLProps(surface, u, v, 1, 1e-6)
+                        point = props.Value()
+                        t_values.append(self._project_point_to_axis(point, ref_axis))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         
         if t_values:
             return (min(t_values), max(t_values))
@@ -1323,6 +1399,70 @@ class FeatureExtractor:
         except Exception:
             pass
         return None
+
+    def _get_relaxed_feature_tolerance(self, solid: Optional[TopoDS_Solid] = None) -> float:
+        """Return a scale-aware tolerance for grouping imported STEP features."""
+        tol = float(self.tolerance)
+        if solid is not None:
+            try:
+                tol = max(tol, self.get_epsilon(solid) * 25.0)
+            except Exception:
+                pass
+        return min(max(tol, 1e-5), 5e-3)
+
+    def _infer_reference_axis_from_cylinders(self, solid: TopoDS_Solid, cylindrical_faces: List[TopoDS_Face]) -> None:
+        """Infer the dominant turning axis from cylindrical faces.
+
+        STEP uploads are often rotated away from world Z. Choosing the strongest
+        coaxial cylindrical group keeps axial extents aligned with the real part axis.
+        """
+        if not cylindrical_faces:
+            return
+
+        relaxed_tol = self._get_relaxed_feature_tolerance(solid)
+        try:
+            face_groups = self._group_coaxial_faces(cylindrical_faces, relaxed_tol)
+        except Exception:
+            return
+
+        best_axis = None
+        best_score = -1.0
+        for group in face_groups:
+            if not group:
+                continue
+
+            axis = self._extract_axis_from_cylinder(group[0])
+            if axis is None:
+                continue
+
+            score = 0.0
+            for face in group:
+                radius = self._extract_radius_from_cylinder(face) or 0.0
+                try:
+                    t_min, t_max = self._face_axis_extents(face, axis)
+                    span = abs(float(t_max) - float(t_min))
+                except Exception:
+                    span = 0.0
+                score += max(radius, 0.0) * max(span, 0.0)
+
+            if score <= 0.0:
+                score = float(len(group))
+
+            if score > best_score:
+                best_axis = axis
+                best_score = score
+
+        if best_axis is not None:
+            self._ref_axis = best_axis
+            if self._debug:
+                loc = best_axis.Location()
+                direction = best_axis.Direction()
+                print(
+                    "DEBUG: Inferred reference axis from cylindrical faces: "
+                    f"origin=({loc.X():.4f}, {loc.Y():.4f}, {loc.Z():.4f}), "
+                    f"dir=({direction.X():.4f}, {direction.Y():.4f}, {direction.Z():.4f}), "
+                    f"score={best_score:.6f}"
+                )
     
     def _are_coaxial(self, axis1: gp_Ax1, axis2: gp_Ax1, tolerance: float) -> bool:
         """Check if two axes are coaxial (parallel and close)."""
@@ -1331,7 +1471,8 @@ class FeatureExtractor:
         
         # Check if directions are parallel (or anti-parallel)
         dot_product = abs(dir1.Dot(dir2))
-        if dot_product < (1.0 - tolerance):
+        angular_tolerance = 1e-4
+        if dot_product < (1.0 - angular_tolerance):
             return False  # Not parallel
         
         # Check if axes are close to each other
@@ -1352,7 +1493,8 @@ class FeatureExtractor:
         perp_vec = vec.Subtracted(proj_vec)
         distance = perp_vec.Magnitude()
         
-        return distance <= tolerance
+        distance_tolerance = max(float(tolerance), 1e-5)
+        return distance <= distance_tolerance
     
     def _cluster_faces_by_radius(self, faces: List[TopoDS_Face], tolerance: float) -> List[List[TopoDS_Face]]:
         """Cluster cylindrical faces by radius within a group."""
@@ -1374,7 +1516,8 @@ class FeatureExtractor:
                 if j != i and j not in processed:
                     radius_j = self._extract_radius_from_cylinder(other_face)
                     if radius_j is not None:
-                        if abs(radius_i - radius_j) <= tolerance:
+                        radius_tolerance = max(float(tolerance), max(abs(radius_i), abs(radius_j), 1.0) * 1e-4)
+                        if abs(radius_i - radius_j) <= radius_tolerance:
                             cluster.append(other_face)
                             processed.add(j)
             
@@ -1409,6 +1552,105 @@ class FeatureExtractor:
             groups.append(group)
         
         return groups
+
+    def _recover_cylindrical_features_from_geometry(
+        self,
+        solid: TopoDS_Solid,
+        cylindrical_faces: List[TopoDS_Face],
+    ) -> Tuple[List[HoleFeature], List[CylinderFeature]]:
+        """Recover basic cylindrical features without relying on internal/external tests.
+
+        This is a last-resort path for imported STEP bodies where the solid-classifier
+        and analytic face orientation checks fail, but cylindrical surfaces are still
+        present. It prefers the largest-radius cluster in a coaxial family as OD and
+        treats clearly smaller clusters as internal bores.
+        """
+        if not cylindrical_faces:
+            return ([], [])
+
+        relaxed_tol = self._get_relaxed_feature_tolerance(solid)
+        face_groups = self._group_coaxial_faces(cylindrical_faces, relaxed_tol)
+        recovered_holes: List[HoleFeature] = []
+        recovered_cylinders: List[CylinderFeature] = []
+        ref_axis = self._get_reference_axis()
+
+        for group_idx, group in enumerate(face_groups):
+            radius_clusters = self._cluster_faces_by_radius(group, relaxed_tol)
+            cluster_infos = []
+            for cluster in radius_clusters:
+                if not cluster:
+                    continue
+
+                representative_face = cluster[0]
+                axis = self._extract_axis_from_cylinder(representative_face)
+                radius = self._extract_radius_from_cylinder(representative_face)
+                if axis is None or radius is None or radius <= 0.0:
+                    continue
+
+                t_mins: List[float] = []
+                t_maxs: List[float] = []
+                for face in cluster:
+                    t_min, t_max = self._face_axis_extents(face, ref_axis)
+                    if math.isfinite(t_min) and math.isfinite(t_max):
+                        t_mins.append(min(t_min, t_max))
+                        t_maxs.append(max(t_min, t_max))
+
+                if not t_mins:
+                    continue
+
+                cluster_infos.append(
+                    {
+                        "cluster": cluster,
+                        "axis": axis,
+                        "radius": radius,
+                        "extent": (min(t_mins), max(t_maxs)),
+                    }
+                )
+
+            if not cluster_infos:
+                continue
+
+            cluster_infos.sort(key=lambda item: item["radius"], reverse=True)
+            max_radius = float(cluster_infos[0]["radius"])
+
+            for cluster_idx, info in enumerate(cluster_infos):
+                radius = float(info["radius"])
+                extent = info["extent"]
+                cluster = info["cluster"]
+                axis = info["axis"]
+                end_faces = self._find_end_faces(cluster, axis, solid)
+                is_external = cluster_idx == 0 or radius >= (0.85 * max_radius)
+
+                if is_external:
+                    recovered_cylinders.append(
+                        CylinderFeature(
+                            axis=axis,
+                            radius=radius,
+                            height=abs(extent[1] - extent[0]) if extent is not None else math.inf,
+                            cylindrical_face=cluster[0],
+                            end_faces=end_faces,
+                            feature_class=CylinderType.BOSS,
+                            is_external=True,
+                            id=f"recovered_cylinder_{group_idx}_{cluster_idx}",
+                            axial_extent=extent,
+                        )
+                    )
+                else:
+                    bottom_face = end_faces[0] if end_faces else None
+                    recovered_holes.append(
+                        HoleFeature(
+                            axis=axis,
+                            diameter=2.0 * radius,
+                            depth=abs(extent[1] - extent[0]) if end_faces else math.inf,
+                            bottom_type=self._classify_bottom_type(bottom_face) if bottom_face else BottomType.NONE,
+                            cylindrical_faces=cluster,
+                            bottom_face=bottom_face,
+                            id=f"recovered_hole_{group_idx}_{cluster_idx}",
+                            axial_extent=extent,
+                        )
+                    )
+
+        return (recovered_holes, recovered_cylinders)
     
     def _find_end_faces(self, cylindrical_faces: List[TopoDS_Face], axis: gp_Ax1, solid: TopoDS_Solid) -> List[TopoDS_Face]:
         """Find end faces (caps) of a cylindrical feature."""
@@ -1763,35 +2005,52 @@ class FeatureExtractor:
         Returns:
             TurnedPartStack with segments covering the full axial range
         """
+        def _normalize_extent(extent: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+            if extent is None:
+                return None
+            z_min, z_max = float(extent[0]), float(extent[1])
+            z_min, z_max = min(z_min, z_max), max(z_min, z_max)
+            if not math.isfinite(z_min) or not math.isfinite(z_max):
+                return None
+            if abs(z_max - z_min) <= tolerance:
+                return None
+            return (z_min, z_max)
+
+        def _extent_overlap(extent_a: Tuple[float, float], extent_b: Tuple[float, float]) -> float:
+            return max(0.0, min(extent_a[1], extent_b[1]) - max(extent_a[0], extent_b[0]))
+
         # Step 1: Collect all unique Z boundaries from all extents (OD + ID)
-        z_boundaries = set()
+        z_boundaries: List[float] = []
+        external_cylinders = [
+            cylinder for cylinder in collection.cylinders
+            if cylinder.is_external and _normalize_extent(cylinder.axial_extent) is not None
+        ]
+        internal_cylinders = [
+            cylinder for cylinder in collection.cylinders
+            if not cylinder.is_external and _normalize_extent(cylinder.axial_extent) is not None
+        ]
+        holes = [hole for hole in collection.holes if _normalize_extent(hole.axial_extent) is not None]
         
         # Collect from external cylinders (OD)
-        for cylinder in collection.cylinders:
-            if cylinder.is_external and cylinder.axial_extent is not None:
-                z_min, z_max = cylinder.axial_extent
-                # Ensure correct ordering (handle potential reversed extents)
-                z_min, z_max = min(z_min, z_max), max(z_min, z_max)
-                z_boundaries.add(z_min)
-                z_boundaries.add(z_max)
+        for cylinder in external_cylinders:
+            z_min, z_max = _normalize_extent(cylinder.axial_extent) or (None, None)
+            if z_min is None or z_max is None:
+                continue
+            z_boundaries.extend([z_min, z_max])
         
         # Collect from internal cylinders/holes (ID)
-        for hole in collection.holes:
-            if hole.axial_extent is not None:
-                z_min, z_max = hole.axial_extent
-                # Ensure correct ordering (handle potential reversed extents)
-                z_min, z_max = min(z_min, z_max), max(z_min, z_max)
-                z_boundaries.add(z_min)
-                z_boundaries.add(z_max)
+        for hole in holes:
+            z_min, z_max = _normalize_extent(hole.axial_extent) or (None, None)
+            if z_min is None or z_max is None:
+                continue
+            z_boundaries.extend([z_min, z_max])
         
         # Also check internal cylinders (if any are marked as internal)
-        for cylinder in collection.cylinders:
-            if not cylinder.is_external and cylinder.axial_extent is not None:
-                z_min, z_max = cylinder.axial_extent
-                # Ensure correct ordering (handle potential reversed extents)
-                z_min, z_max = min(z_min, z_max), max(z_min, z_max)
-                z_boundaries.add(z_min)
-                z_boundaries.add(z_max)
+        for cylinder in internal_cylinders:
+            z_min, z_max = _normalize_extent(cylinder.axial_extent) or (None, None)
+            if z_min is None or z_max is None:
+                continue
+            z_boundaries.extend([z_min, z_max])
         
         if not z_boundaries:
             # No extents found, return empty stack
@@ -1799,51 +2058,90 @@ class FeatureExtractor:
         
         # Step 2: Sort boundaries and build consecutive segments [Zi, Zi+1]
         sorted_boundaries = sorted(z_boundaries)
+        merged_boundaries: List[float] = []
+        for boundary in sorted_boundaries:
+            if not merged_boundaries or abs(boundary - merged_boundaries[-1]) > tolerance:
+                merged_boundaries.append(boundary)
+
+        if len(merged_boundaries) < 2:
+            return TurnedPartStack(segments=[])
+
         segments = []
         
-        for i in range(len(sorted_boundaries) - 1):
-            z_start = sorted_boundaries[i]
-            z_end = sorted_boundaries[i + 1]
+        for i in range(len(merged_boundaries) - 1):
+            z_start = merged_boundaries[i]
+            z_end = merged_boundaries[i + 1]
+            if abs(z_end - z_start) <= tolerance:
+                continue
+            segment_extent = (z_start, z_end)
             
             # Step 3: For each segment, assign OD and ID radii
             # Find OD: external cylinder whose extent fully covers the segment
             od_radius = 0.0
-            for cylinder in collection.cylinders:
-                if cylinder.is_external and cylinder.axial_extent is not None:
-                    cyl_z_min, cyl_z_max = cylinder.axial_extent
-                    # Ensure correct ordering (handle potential reversed extents)
-                    cyl_z_min, cyl_z_max = min(cyl_z_min, cyl_z_max), max(cyl_z_min, cyl_z_max)
-                    # Check if cylinder extent fully covers the segment (within tolerance)
-                    if (cyl_z_min <= z_start + tolerance and cyl_z_max >= z_end - tolerance):
-                        # Use the cylinder with the largest radius if multiple cover the segment
-                        if cylinder.radius > od_radius:
-                            od_radius = cylinder.radius
+            best_od_overlap = 0.0
+            for cylinder in external_cylinders:
+                cyl_extent = _normalize_extent(cylinder.axial_extent)
+                if cyl_extent is None:
+                    continue
+                overlap = _extent_overlap(segment_extent, cyl_extent)
+                if overlap <= tolerance:
+                    continue
+                fully_covers = cyl_extent[0] <= z_start + tolerance and cyl_extent[1] >= z_end - tolerance
+                if fully_covers:
+                    if cylinder.radius > od_radius:
+                        od_radius = cylinder.radius
+                        best_od_overlap = overlap
+                elif od_radius <= 0.0 and overlap > best_od_overlap:
+                    od_radius = cylinder.radius
+                    best_od_overlap = overlap
             
             # Find ID: internal cylinder/hole whose extent fully covers the segment
             id_radius = 0.0
-            for hole in collection.holes:
-                if hole.axial_extent is not None:
-                    hole_z_min, hole_z_max = hole.axial_extent
-                    # Ensure correct ordering (handle potential reversed extents)
-                    hole_z_min, hole_z_max = min(hole_z_min, hole_z_max), max(hole_z_min, hole_z_max)
-                    # Check if hole extent fully covers the segment (within tolerance)
-                    if (hole_z_min <= z_start + tolerance and hole_z_max >= z_end - tolerance):
-                        # Use the hole with the largest radius if multiple cover the segment
-                        hole_radius = hole.diameter / 2.0
-                        if hole_radius > id_radius:
-                            id_radius = hole_radius
+            best_id_overlap = 0.0
+            for hole in holes:
+                hole_extent = _normalize_extent(hole.axial_extent)
+                if hole_extent is None:
+                    continue
+                overlap = _extent_overlap(segment_extent, hole_extent)
+                if overlap <= tolerance:
+                    continue
+                hole_radius = hole.diameter / 2.0
+                fully_covers = hole_extent[0] <= z_start + tolerance and hole_extent[1] >= z_end - tolerance
+                if fully_covers:
+                    if hole_radius > id_radius:
+                        id_radius = hole_radius
+                        best_id_overlap = overlap
+                elif id_radius <= 0.0 and overlap > best_id_overlap:
+                    id_radius = hole_radius
+                    best_id_overlap = overlap
             
             # Also check internal cylinders
-            for cylinder in collection.cylinders:
-                if not cylinder.is_external and cylinder.axial_extent is not None:
-                    cyl_z_min, cyl_z_max = cylinder.axial_extent
-                    # Ensure correct ordering (handle potential reversed extents)
-                    cyl_z_min, cyl_z_max = min(cyl_z_min, cyl_z_max), max(cyl_z_min, cyl_z_max)
-                    # Check if cylinder extent fully covers the segment (within tolerance)
-                    if (cyl_z_min <= z_start + tolerance and cyl_z_max >= z_end - tolerance):
-                        # Use the cylinder with the largest radius if multiple cover the segment
-                        if cylinder.radius > id_radius:
-                            id_radius = cylinder.radius
+            for cylinder in internal_cylinders:
+                cyl_extent = _normalize_extent(cylinder.axial_extent)
+                if cyl_extent is None:
+                    continue
+                overlap = _extent_overlap(segment_extent, cyl_extent)
+                if overlap <= tolerance:
+                    continue
+                fully_covers = cyl_extent[0] <= z_start + tolerance and cyl_extent[1] >= z_end - tolerance
+                if fully_covers:
+                    if cylinder.radius > id_radius:
+                        id_radius = cylinder.radius
+                        best_id_overlap = overlap
+                elif id_radius <= 0.0 and overlap > best_id_overlap:
+                    id_radius = cylinder.radius
+                    best_id_overlap = overlap
+
+            if od_radius <= 0.0 and segments:
+                od_radius = segments[-1].od_diameter / 2.0
+
+            if id_radius <= 0.0 and segments and segments[-1].id_diameter > 0.0:
+                previous_id_radius = segments[-1].id_diameter / 2.0
+                if previous_id_radius < od_radius:
+                    id_radius = previous_id_radius
+
+            if od_radius > 0.0 and id_radius > od_radius:
+                id_radius = 0.0
             
             # Create segment
             segment = TurnedPartSegment(
@@ -1854,6 +2152,11 @@ class FeatureExtractor:
                 wall_thickness=0.0  # Will be computed in __post_init__
             )
             segments.append(segment)
+
+        while segments and segments[0].od_diameter <= 0.0:
+            segments.pop(0)
+        while segments and segments[-1].od_diameter <= 0.0:
+            segments.pop()
         
         stack = TurnedPartStack(segments=segments)
         
