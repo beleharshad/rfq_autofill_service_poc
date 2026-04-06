@@ -1,12 +1,12 @@
-"""LLM-powered PDF analysis endpoints.
+"""LLM-powered PDF and STEP analysis endpoints.
 
 POST /api/v1/llm/pdf/analyze
-  - Accepts a PDF upload (no job required).
+    - Accepts a PDF upload (no job required).
   - Runs the two-agent pipeline (ExtractorAgent → ValidatorAgent).
   - Returns structured JSON with extracted specs + validation report.
 
 POST /api/v1/llm/jobs/{job_id}/llm-analyze
-  - Uses the already-uploaded source.pdf stored under an existing job.
+    - Uses the already-uploaded PDF or STEP stored under an existing job.
   - Saves result to outputs/llm_analysis.json.
 
 GET /api/v1/llm/jobs/{job_id}/llm-analysis
@@ -27,14 +27,33 @@ from fastapi.responses import StreamingResponse
 
 from app.services import pdf_llm_pipeline
 from app.services.job_service import JobService
+from app.services.step_analysis_service import StepAnalysisService
 from app.storage.file_storage import FileStorage
 
 router = APIRouter()
 job_service = JobService()
 file_storage = FileStorage()
+step_analysis_service = StepAnalysisService()
 
 _RESULT_FILENAME = "llm_analysis.json"
 _CORRECTIONS_FILENAME = "corrections.json"
+
+
+def _find_job_analysis_source(inputs_path: Path) -> tuple[str, Path] | None:
+    pdf_path = inputs_path / "source.pdf"
+    if pdf_path.exists():
+        return "pdf", pdf_path
+
+    for candidate in sorted(inputs_path.glob("*.pdf")):
+        if candidate.is_file():
+            return "pdf", candidate
+
+    for pattern in ("*.step", "*.stp"):
+        for candidate in sorted(inputs_path.glob(pattern)):
+            if candidate.is_file():
+                return "step", candidate
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +101,10 @@ async def analyze_pdf_upload(file: UploadFile = File(...)):
 
 @router.post("/jobs/{job_id}/llm-analyze")
 async def analyze_job_pdf(job_id: str):
-    """Run the two-agent LLM analysis on an existing job's source.pdf.
+    """Run LLM analysis on an existing job's PDF or STEP source.
 
-    The PDF must have been previously uploaded via
-    ``POST /api/v1/jobs/{job_id}/pdf/upload``.
+    PDFs are analyzed with the drawing/OCR pipeline.
+    STEP/STP files are analyzed with a STEP-aware geometry prompt.
     """
     try:
         job_service.get_job(job_id)
@@ -93,16 +112,21 @@ async def analyze_job_pdf(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     inputs_path = file_storage.get_inputs_path(job_id)
-    pdf_path = inputs_path / "source.pdf"
+    analysis_source = _find_job_analysis_source(inputs_path)
 
-    if not pdf_path.exists():
+    if not analysis_source:
         raise HTTPException(
             status_code=404,
-            detail="No PDF uploaded for this job. Call /pdf/upload first.",
+            detail="No PDF or STEP file uploaded for this job.",
         )
 
+    source_type, source_path = analysis_source
+
     try:
-        result = pdf_llm_pipeline.run_pipeline(pdf_path)
+        if source_type == "pdf":
+            result = pdf_llm_pipeline.run_pipeline(source_path)
+        else:
+            result = step_analysis_service.analyze_step_job(job_id, source_path)
     except RuntimeError as exc:
         _err = str(exc)
         _is_rl = "429" in _err or "rate limit" in _err.lower()
@@ -144,8 +168,8 @@ async def analyze_job_pdf(job_id: str):
 
     # Update part_summary.json totals to match LLM-extracted dimensions so that the
     # displayed totals and future 3D calibration are always anchored to LLM values.
-    # Also invalidate any cached STEP/GLB so the next 3d-preview call regenerates
-    # with LLM-calibrated geometry.
+    # For PDF-based jobs, also invalidate cached generated STEP/GLB so the next
+    # 3d-preview call regenerates with LLM-calibrated geometry.
     try:
         ps_file = outputs_path / "part_summary.json"
         if ps_file.exists():
@@ -168,11 +192,11 @@ async def analyze_job_pdf(job_id: str):
                     "id_in":    llm_id,
                 }
                 ps_file.write_text(json.dumps(ps, indent=2), encoding="utf-8")
-        # Invalidate cached STEP/GLB so 3d-preview regenerates with LLM calibration
-        for _stale in ("model.step", "model.glb"):
-            _sp = outputs_path / _stale
-            if _sp.exists():
-                _sp.unlink(missing_ok=True)
+        if source_type == "pdf":
+            for _stale in ("model.step", "model.glb"):
+                _sp = outputs_path / _stale
+                if _sp.exists():
+                    _sp.unlink(missing_ok=True)
     except Exception:
         pass  # non-fatal — do not block response
 

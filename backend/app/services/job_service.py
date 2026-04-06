@@ -2,12 +2,12 @@
 
 import uuid
 import shutil
-from pathlib import Path
 from typing import List, Optional
 from fastapi import UploadFile, HTTPException
 from app.models.job import JobResponse, JobStatus, JobMode
 from app.storage.job_storage import JobStorage
 from app.storage.file_storage import FileStorage
+from app.services.step_analysis_service import StepAnalysisService
 
 
 class JobService:
@@ -17,6 +17,7 @@ class JobService:
         """Initialize job service."""
         self.job_storage = JobStorage()
         self.file_storage = FileStorage()
+        self.step_analysis_service = StepAnalysisService()
     
     def create_job(
         self, 
@@ -86,19 +87,32 @@ class JobService:
                 with open(temp_zip_path, "wb") as f:
                     shutil.copyfileobj(file.file, f)
                 
-                # Extract PDFs from ZIP
+                # Extract supported files from ZIP
                 extracted = self.file_storage.extract_zip(job_id, temp_zip_path)
                 uploaded_files.extend(extracted)
+
+                for rel_path in extracted:
+                    if rel_path.lower().endswith(('.step', '.stp')):
+                        self.step_analysis_service.process_uploaded_step(
+                            job_id,
+                            self.file_storage.get_job_path(job_id) / rel_path,
+                        )
                 
                 # Remove temporary ZIP
                 temp_zip_path.unlink()
             else:
-                # Save regular file (PDF expected)
-                if file.filename and not file.filename.lower().endswith('.pdf'):
-                    continue  # Skip non-PDF files
+                # Save regular file (PDF / STEP / STP accepted)
+                if file.filename and not file.filename.lower().endswith(('.pdf', '.step', '.stp')):
+                    continue  # Skip unsupported files
                 
                 saved_path = self.file_storage.save_uploaded_file(job_id, file)
                 uploaded_files.append(saved_path)
+
+                if saved_path.lower().endswith(('.step', '.stp')):
+                    self.step_analysis_service.process_uploaded_step(
+                        job_id,
+                        self.file_storage.get_job_path(job_id) / saved_path,
+                    )
         
         # Update job status
         if uploaded_files:

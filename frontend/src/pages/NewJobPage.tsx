@@ -23,12 +23,17 @@ function NewJobPage() {
         (file) =>
           file.type === 'application/pdf' ||
           file.type === 'application/zip' ||
+          file.type === 'application/step' ||
+          file.type === 'application/x-step' ||
+          file.type === 'model/step' ||
           file.name.toLowerCase().endsWith('.pdf') ||
-          file.name.toLowerCase().endsWith('.zip')
+          file.name.toLowerCase().endsWith('.zip') ||
+          file.name.toLowerCase().endsWith('.step') ||
+          file.name.toLowerCase().endsWith('.stp')
       );
       setFiles(validFiles);
       if (validFiles.length !== fileArray.length) {
-        setError('Some files were skipped. Only PDF and ZIP files are allowed.');
+        setError('Some files were skipped. Only PDF, ZIP, STEP, and STP files are allowed.');
       } else {
         setError(null);
       }
@@ -39,7 +44,7 @@ function NewJobPage() {
     e.preventDefault();
     
     if (files.length === 0) {
-      setError('Please select at least one PDF or ZIP file.');
+      setError('Please select at least one PDF, ZIP, STEP, or STP file.');
       return;
     }
 
@@ -106,11 +111,11 @@ function NewJobPage() {
           <p className="mode-description">
             {mode === 'assisted_manual'
               ? 'You will manually enter dimensions while viewing the PDF.'
-              : 'The system will attempt to automatically detect and extract dimensions from the PDF.'}
+              : 'The system will attempt to automatically detect and extract dimensions from the PDF or STEP geometry.'}
           </p>
         </div>
         <div className="form-group">
-          <label htmlFor="job-files">Upload PDF or ZIP Files *</label>
+          <label htmlFor="job-files">Upload PDF, STEP, or ZIP Files *</label>
           <div className="sample-upload-row">
             <button
               type="button"
@@ -127,7 +132,7 @@ function NewJobPage() {
             id="job-files"
             name="files"
             multiple
-            accept=".pdf,.zip,application/pdf,application/zip"
+            accept=".pdf,.zip,.step,.stp,application/pdf,application/zip,application/step,application/x-step,model/step"
             onChange={handleFileChange}
             className="file-input"
           />

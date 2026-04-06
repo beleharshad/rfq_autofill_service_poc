@@ -55,31 +55,35 @@ class FileStorage:
         return f"inputs/{safe_filename}"
 
     def extract_zip(self, job_id: str, zip_path: Path) -> List[str]:
-        """Extract PDF files from a ZIP archive.
+        """Extract supported CAD/doc files from a ZIP archive.
 
         Returns:
-            List of extracted PDF file paths (relative to job directory)
+            List of extracted file paths (relative to job directory)
         """
         self.ensure_job_directories(job_id)
         inputs_path = self.get_inputs_path(job_id)
         extracted_files: List[str] = []
+        allowed_exts = {".pdf", ".step", ".stp"}
 
         try:
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 for member in zip_ref.namelist():
-                    if member.endswith("/") or not member.lower().endswith(".pdf"):
+                    member_ext = Path(member).suffix.lower()
+                    if member.endswith("/") or member_ext not in allowed_exts:
                         continue
 
                     safe_filename = self._sanitize_filename(Path(member).name)
-                    if not safe_filename.lower().endswith(".pdf"):
+                    safe_ext = Path(safe_filename).suffix.lower()
+                    if safe_ext not in allowed_exts:
                         continue
 
                     extracted_path = inputs_path / safe_filename
 
                     counter = 1
                     base_name = extracted_path.stem
+                    ext = extracted_path.suffix
                     while extracted_path.exists():
-                        extracted_path = inputs_path / f"{base_name}_{counter}.pdf"
+                        extracted_path = inputs_path / f"{base_name}_{counter}{ext}"
                         counter += 1
 
                     with zip_ref.open(member) as source, open(extracted_path, "wb") as target:

@@ -24,9 +24,13 @@ _ALLOWED_MIME = {
     "application/pdf",
     "application/zip",
     "application/x-zip-compressed",
+    "application/step",
+    "application/x-step",
+    "model/step",
+    "chemical/x-step",
     "application/octet-stream",  # some browsers send this for .pdf/.zip
 }
-_ALLOWED_EXT = {".pdf", ".zip"}
+_ALLOWED_EXT = {".pdf", ".zip", ".step", ".stp"}
 _MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB per file
 
 
@@ -37,7 +41,7 @@ def _validate_upload(file: UploadFile) -> None:
     if ext not in _ALLOWED_EXT:
         raise HTTPException(
             status_code=400,
-            detail=f"File type not allowed: '{file.filename}'. Only PDF and ZIP files are accepted.",
+            detail=f"File type not allowed: '{file.filename}'. Only PDF, ZIP, STEP, and STP files are accepted.",
         )
     if file.size is not None and file.size > _MAX_FILE_BYTES:
         raise HTTPException(
@@ -229,7 +233,7 @@ async def download_file(job_id: str, path: str):
     # Determine content type
     media_type = "application/octet-stream"
     lower = filename.lower()
-    if lower.endswith(".step"):
+    if lower.endswith(".step") or lower.endswith(".stp"):
         media_type = "application/step"
     elif lower.endswith(".json"):
         media_type = "application/json"

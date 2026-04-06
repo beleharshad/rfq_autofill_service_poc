@@ -225,6 +225,8 @@ function AutoConvertResults({
   const loadResults = async (): Promise<boolean | 'interrupted' | null> => {
     console.log('[AutoConvertResults] Loading results for job:', jobId);
     let foundInferredStack = false;
+    let foundPartSummary = false;
+    let foundUploadedStep = false;
     let llmInterrupted = false;
     try {
       setLoading(true);
@@ -232,6 +234,7 @@ function AutoConvertResults({
 
       const files = await api.getJobFiles(jobId);
       cachedFilesRef.current = files;
+      foundUploadedStep = files.files.some((f) => /(^inputs\/.*\.(step|stp)$)|(^(outputs\/model\.step)$)/i.test(f.path));
 
       // Determine PDF page url (first page image — pages are 0-indexed: page_0.png, page_1.png …)
       if (!propPdfPageUrl) {
@@ -252,8 +255,8 @@ function AutoConvertResults({
           if (jobName) {
             setRfqPartNo(normalizePartNo(jobName));
           } else {
-            const pdf = files.files.find((f) => f.name.toLowerCase().endsWith('.pdf'));
-            if (pdf?.name) setRfqPartNo(normalizePartNo(pdf.name.replace(/\.pdf$/i, '')));
+            const sourceFile = files.files.find((f) => /\.(pdf|step|stp)$/i.test(f.name));
+            if (sourceFile?.name) setRfqPartNo(normalizePartNo(sourceFile.name.replace(/\.(pdf|step|stp)$/i, '')));
           }
         } catch (e) {
           console.warn('[AutoConvertResults] Failed to prefill part no:', e);
@@ -286,6 +289,7 @@ function AutoConvertResults({
       // part_summary.json
       const partSummaryFile = files.files.find((f) => f.path === 'outputs/part_summary.json');
       if (partSummaryFile) {
+        foundPartSummary = true;
         const res = await api.fetchJobFile(jobId, partSummaryFile.path);
         if (res.ok) {
           const data = await res.json();
@@ -331,7 +335,7 @@ function AutoConvertResults({
     }
     // Successful load — clear any stale detectionError from a prior failed auto-detect attempt
     setDetectionError(null);
-    return llmInterrupted ? 'interrupted' : foundInferredStack;
+    return llmInterrupted ? 'interrupted' : (foundInferredStack || (foundUploadedStep && foundPartSummary));
   };
 
   // ── PDF pages gate ────────────────────────────────────────────────────────

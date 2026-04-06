@@ -164,9 +164,9 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
       {/* ── Header ── */}
       <div className="llm-panel-header">
         <div>
-          <h2 className="llm-panel-title">PDF Analysis</h2>
+          <h2 className="llm-panel-title">Drawing / STEP Analysis</h2>
           <p className="llm-panel-subtitle">
-            Two-agent pipeline: Agent 1 extracts specs, Agent 2 validates them.
+            Analyzes uploaded PDF drawings and STEP CAD files, then validates the extracted specs.
           </p>
         </div>
         <div className="llm-panel-actions">
@@ -201,8 +201,8 @@ export default function LLMAnalysisPanel({ jobId, onCorrectionsChange }: Props) 
           <div className="llm-empty-icon">🤖</div>
           <p>No analysis yet for this job.</p>
           <p className="llm-empty-hint">
-            Click <strong>▶ Run LLM Analysis</strong> to extract part specs from the uploaded PDF.
-            Analysis also runs automatically after infer-stack completes.
+            Click <strong>▶ Run LLM Analysis</strong> to extract part specs from the uploaded PDF or STEP file.
+            Analysis also runs automatically after infer-stack completes or a STEP file is processed.
           </p>
         </div>
       )}
