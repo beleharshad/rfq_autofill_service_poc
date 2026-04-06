@@ -287,8 +287,12 @@ function getViewerDimensions(summary: PartSummary): ViewerDimensions {
   const positiveIds = summary.segments
     .map((segment) => segment.id_diameter)
     .filter((value) => Number.isFinite(value) && value > 0);
+  const zSpan =
+    summary.z_range && summary.z_range.length >= 2
+      ? summary.z_range[1] - summary.z_range[0]
+      : null;
 
-  const length = selected?.length_in ?? summary.totals?.total_length_in ?? (summary.z_range?.[1] - summary.z_range?.[0]) ?? null;
+  const length = selected?.length_in ?? summary.totals?.total_length_in ?? zSpan;
   const maxOd = selected?.od_in ?? summary.totals?.max_od_in ?? null;
   const boreId = selected?.id_in ?? (positiveIds.length ? Math.min(...positiveIds) : null);
   const featureLines = buildFeatureList(summary);
@@ -1431,10 +1435,10 @@ function ThreeJSViewer({
   const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : 'realistic';
   const [cameraVersion, setCameraVersion] = useState(1);
   
-  const [showOD, setShowOD] = useState(true);
-  const [showID, setShowID] = useState(true);
-  const [highlightThinWall, setHighlightThinWall] = useState(false);
-  const [thinWallThreshold, setThinWallThreshold] = useState(0.1); // Default 0.1 units
+  const [showOD] = useState(true);
+  const [showID] = useState(true);
+  const [highlightThinWall] = useState(false);
+  const [thinWallThreshold] = useState(0.1); // Default 0.1 units
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [hasGlb, setHasGlb] = useState(false);
   const [glbLoading, setGlbLoading] = useState(false);
@@ -1443,9 +1447,9 @@ function ThreeJSViewer({
   const [hoveredHudDim, setHoveredHudDim] = useState<string | null>(null);
   
   // Overlay toggles
-  const [showODOverlay, setShowODOverlay] = useState(false);
-  const [showIDOverlay, setShowIDOverlay] = useState(false);
-  const [showShoulderPlanes, setShowShoulderPlanes] = useState(false);
+  const [showODOverlay] = useState(false);
+  const [showIDOverlay] = useState(false);
+  const [showShoulderPlanes] = useState(false);
   
   // Hover state
   const [hoveredSegmentIndex, setHoveredSegmentIndex] = useState<number | null>(null);

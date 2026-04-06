@@ -127,6 +127,9 @@ export interface PartSummary {
     id_shoulder_area_in2: number;
     planar_ring_area_in2: number;
     total_surface_area_in2: number;
+    total_length_in?: number;
+    max_od_in?: number;
+    max_id_in?: number;
   };
   feature_counts: {
     external_cylinders: number;
