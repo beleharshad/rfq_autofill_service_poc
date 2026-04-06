@@ -1986,6 +1986,20 @@ function ThreeJSViewer({
     setCameraVersion((version) => version + 1);
   }, [jobId]);
 
+  useEffect(() => {
+    if (!glbUrl) return;
+
+    const timers = [0, 120, 300, 700].map((delay) =>
+      window.setTimeout(() => {
+        setCameraVersion((version) => version + 1);
+      }, delay)
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [glbUrl]);
+
   const cameraFov = renderViewMode === 'realistic' ? 34 : 38;
 
   return (

@@ -964,7 +964,7 @@ function AutoConvertResults({
 
           <div className="acr-viewer-wrap">
             {isStepBacked && partSummary ? (
-              <ThreeJSViewer summary={partSummary} jobId={jobId} toolbarVariant="compact" />
+              <ThreeJSViewer summary={partSummary} jobId={jobId} />
             ) : (
               <LatheViewer
                 segments={mergeSegments ? cleanedSegs : latheSegsNorm}
