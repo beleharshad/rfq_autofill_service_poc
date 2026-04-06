@@ -13,10 +13,10 @@ import './ThreeJSViewer.css';
 const VIEWER_BG = '#101418';
 const VIEWER_GRID_CELL = '#1A2A38';
 const VIEWER_GRID_SECTION = '#1E3448';
-const VIEWER_METAL = 0xc7d3df;
-const VIEWER_METAL_DARK = 0x7f93aa;
-const VIEWER_BORE = 0x142231;
-const VIEWER_HIGHLIGHT = 0xe9eef5;
+const VIEWER_METAL = 0xb8bec6;
+const VIEWER_METAL_DARK = 0x6f7680;
+const VIEWER_BORE = 0x2f353d;
+const VIEWER_HIGHLIGHT = 0xf3f5f7;
 const DIM_GOLD = '#FFD700';
 const DIM_CYAN = '#00D4FF';
 
@@ -987,17 +987,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
               let newMaterial: THREE.Material;
               if (viewMode === 'realistic') {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color('#edf3f9'), 0.94),
-                  metalness: 0.92,
-                  roughness: 0.13,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#c5cbd2'), 0.96),
+                  metalness: 0.97,
+                  roughness: 0.11,
                   clearcoat: 1,
-                  clearcoatRoughness: 0.08,
+                  clearcoatRoughness: 0.05,
                   reflectivity: 1,
-                  envMapIntensity: 3.6,
+                  envMapIntensity: 4.1,
                   specularIntensity: 1,
                   specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-                  emissive: new THREE.Color('#4a5c70'),
-                  emissiveIntensity: 0.08,
+                  emissive: new THREE.Color('#4a4f56'),
+                  emissiveIntensity: 0.06,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -1015,14 +1015,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
                 });
               } else {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color('#dde6ef'), 0.86),
-                  metalness: 0.45,
-                  roughness: 0.44,
-                  clearcoat: 0.28,
-                  clearcoatRoughness: 0.18,
-                  envMapIntensity: 1.1,
-                  emissive: new THREE.Color('#405062'),
-                  emissiveIntensity: 0.12,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#b3b9c1'), 0.9),
+                  metalness: 0.82,
+                  roughness: 0.2,
+                  clearcoat: 0.44,
+                  clearcoatRoughness: 0.1,
+                  envMapIntensity: 1.75,
+                  emissive: new THREE.Color('#3e434a'),
+                  emissiveIntensity: 0.05,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -1044,17 +1044,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
           // No material, create a default material based on view mode
           if (viewMode === 'realistic') {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#edf3f9'),
-              metalness: 0.92,
-              roughness: 0.13,
+              color: new THREE.Color('#c5cbd2'),
+              metalness: 0.97,
+              roughness: 0.11,
               clearcoat: 1,
-              clearcoatRoughness: 0.08,
+              clearcoatRoughness: 0.05,
               reflectivity: 1,
-              envMapIntensity: 3.6,
+              envMapIntensity: 4.1,
               specularIntensity: 1,
               specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-              emissive: new THREE.Color('#4a5c70'),
-              emissiveIntensity: 0.08,
+              emissive: new THREE.Color('#4a4f56'),
+              emissiveIntensity: 0.06,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
@@ -1072,14 +1072,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
             });
           } else {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#dde6ef'),
-              metalness: 0.45,
-              roughness: 0.44,
-              clearcoat: 0.28,
-              clearcoatRoughness: 0.18,
-              envMapIntensity: 1.1,
-              emissive: new THREE.Color('#405062'),
-              emissiveIntensity: 0.12,
+              color: new THREE.Color('#b3b9c1'),
+              metalness: 0.82,
+              roughness: 0.2,
+              clearcoat: 0.44,
+              clearcoatRoughness: 0.1,
+              envMapIntensity: 1.75,
+              emissive: new THREE.Color('#3e434a'),
+              emissiveIntensity: 0.05,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,

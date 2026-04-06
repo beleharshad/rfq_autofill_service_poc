@@ -38,10 +38,10 @@ export function EdgeOutlines({ viewMode, enabled }: EdgeOutlinesProps) {
       try {
         const edges = new THREE.EdgesGeometry(mesh.geometry);
         const edgeMaterial = new THREE.LineBasicMaterial({
-          color: 0x7f93aa,
+          color: 0x6b7077,
           linewidth: 1,
           transparent: true,
-          opacity: 0.28,
+          opacity: 0.24,
         });
         const edgeLines = new THREE.LineSegments(edges, edgeMaterial);
         
