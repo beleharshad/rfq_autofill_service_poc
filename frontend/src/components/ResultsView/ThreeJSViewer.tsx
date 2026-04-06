@@ -204,6 +204,42 @@ function SegmentMesh({
   );
 }
 
+function SegmentBoundaryRings({
+  segments,
+}: {
+  segments: PartSummary['segments'];
+}) {
+  if (!segments || segments.length < 2) return null;
+
+  return (
+    <>
+      {segments.slice(0, -1).map((segment, index) => {
+        const boundaryZ = segment.z_end;
+        const ringRadius = Math.max((segment.od_diameter || 0) / 2 + 0.018, 0.02);
+        const tubeRadius = Math.max(Math.min(ringRadius * 0.012, 0.03), 0.008);
+        return (
+          <mesh
+            key={`segment-boundary-${index}`}
+            position={[0, 0, boundaryZ]}
+            rotation={[Math.PI / 2, 0, 0]}
+            renderOrder={5000 + index}
+            frustumCulled={false}
+          >
+            <torusGeometry args={[ringRadius, tubeRadius, 10, 48]} />
+            <meshStandardMaterial
+              color={index % 2 === 0 ? '#9fb7d1' : '#6b8198'}
+              metalness={0.25}
+              roughness={0.75}
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
+
 interface GlbModelProps {
   url: string;
   viewMode: ViewMode;
@@ -1321,18 +1357,21 @@ function Scene({
           <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} dims={getViewerDimensions(summary)} />
         </Suspense>
       ) : !forceGlbOnly ? (
-        summary.segments.map((segment, index) => (
-          <SegmentMesh
-            key={index}
-            segment={segment}
-            index={index}
-            showOD={showOD}
-            showID={showID}
-            highlightThinWall={highlightThinWall}
-            thinWallThreshold={thinWallThreshold}
-            viewMode={viewMode}
-          />
-        ))
+        <>
+          {summary.segments.map((segment, index) => (
+            <SegmentMesh
+              key={index}
+              segment={segment}
+              index={index}
+              showOD={showOD}
+              showID={showID}
+              highlightThinWall={highlightThinWall}
+              thinWallThreshold={thinWallThreshold}
+              viewMode={viewMode}
+            />
+          ))}
+          <SegmentBoundaryRings segments={summary.segments} />
+        </>
       ) : null}
 
       {/* Feature Overlays */}
@@ -1563,6 +1602,7 @@ function ThreeJSViewer({
   const [highlightThinWall] = useState(false);
   const [thinWallThreshold] = useState(0.1); // Default 0.1 units
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
+  const [, setHasGlb] = useState(false);
   const [glbLoading, setGlbLoading] = useState(false);
   const [glbError, setGlbError] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
@@ -1581,10 +1621,20 @@ function ThreeJSViewer({
   const controlsRef = useRef<any>(null);
   const glbObjectUrlRef = useRef<string | null>(null);
   const isStepBacked = (summary.inference_metadata?.source || '').startsWith('uploaded_step');
-  const preferProceduralStep = isStepBacked && (summary.segments?.length ?? 0) > 1;
-  const activeGlbUrl = preferProceduralStep ? null : glbUrl;
-  const showGlbBadge = Boolean(activeGlbUrl);
-  const showStepBadge = isStepBacked && !showGlbBadge;
+  const hasSegmentProfile = useMemo(() => {
+    if ((summary.segments?.length ?? 0) < 2) return false;
+    let idChanges = 0;
+    let odChanges = 0;
+    for (let i = 1; i < summary.segments.length; i++) {
+      const prev = summary.segments[i - 1];
+      const curr = summary.segments[i];
+      if (Math.abs((curr.id_diameter ?? 0) - (prev.id_diameter ?? 0)) > 0.01) idChanges += 1;
+      if (Math.abs((curr.od_diameter ?? 0) - (prev.od_diameter ?? 0)) > 0.01) odChanges += 1;
+    }
+    return idChanges > 0 || odChanges > 0;
+  }, [summary.segments]);
+  const preferProceduralForStep = isStepBacked && hasSegmentProfile;
+  const activeGlbUrl = preferProceduralForStep ? null : glbUrl;
 
   // Handle mouse move for tooltip positioning
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1602,13 +1652,6 @@ function ThreeJSViewer({
 
   // Load GLB preview.
   useEffect(() => {
-    if (preferProceduralStep) {
-      setGlbLoading(false);
-      setGlbError(null);
-      setGlbUrl(null);
-      return;
-    }
-
     let cancelled = false;
 
     const revokeBlobUrl = () => {
@@ -1624,6 +1667,17 @@ function ThreeJSViewer({
       setGlbUrl(url);
     };
 
+    if (preferProceduralForStep) {
+      setHasGlb(false);
+      setGlbLoading(false);
+      setGlbError(null);
+      assignBlobUrl(null);
+      return () => {
+        cancelled = true;
+        revokeBlobUrl();
+      };
+    }
+
     const loadStepBackedGlb = async () => {
       setGlbLoading(true);
       setGlbError(null);
@@ -1633,9 +1687,11 @@ function ThreeJSViewer({
           URL.revokeObjectURL(blobUrl);
           return;
         }
+        setHasGlb(true);
         assignBlobUrl(blobUrl);
       } catch (err) {
         if (!cancelled) {
+          setHasGlb(false);
           assignBlobUrl(null);
           setGlbError(err instanceof Error ? err.message : 'Failed to load STEP-based 3D preview');
         }
@@ -1649,6 +1705,7 @@ function ThreeJSViewer({
         const files = await api.getJobFiles(jobId);
         const glbFile = files.files.find((f) => f.name === 'model.glb');
         if (glbFile) {
+          setHasGlb(true);
           setGlbError(null);
           try {
             const blobUrl = await api.fetchBlobUrl(jobId, 'outputs/model.glb');
@@ -1685,7 +1742,7 @@ function ThreeJSViewer({
       clearInterval(interval);
       revokeBlobUrl();
     };
-  }, [jobId, isStepBacked, preferProceduralStep]);
+  }, [jobId, isStepBacked, preferProceduralForStep]);
 
   const handleResetView = useCallback(() => {
     setCameraVersion((version) => version + 1);
@@ -1742,8 +1799,9 @@ function ThreeJSViewer({
     <div className={`threejs-viewer${isStepBacked ? ' acr-viewer-wrap threejs-viewer--step' : ''}`}>
       <div className="viewer-header">
         <h3>
-          3D View {showGlbBadge && <span className="glb-badge">(GLB)</span>}
-          {showStepBadge && <span className="glb-badge">(STEP)</span>}
+          3D View {activeGlbUrl && <span className="glb-badge">(GLB)</span>}
+          {preferProceduralForStep && <span className="glb-badge">(SEGMENTS)</span>}
+          {isStepBacked && !activeGlbUrl && !preferProceduralForStep && <span className="glb-badge">(STEP)</span>}
         </h3>
       </div>
       <div 
@@ -1805,7 +1863,7 @@ function ThreeJSViewer({
             showSlots={showSlots}
             showChamfers={showChamfers}
             showFillets={showFillets}
-            forceGlbOnly={isStepBacked && !preferProceduralStep}
+            forceGlbOnly={isStepBacked && !preferProceduralForStep}
             cameraPreset={cameraPreset}
             cameraVersion={cameraVersion}
           />
@@ -1816,7 +1874,7 @@ function ThreeJSViewer({
             <GizmoViewcube />
           </GizmoHelper>
         </Canvas>
-        {isStepBacked && !preferProceduralStep && !activeGlbUrl && (
+        {isStepBacked && !activeGlbUrl && !preferProceduralForStep && (
           <div className="viewer-loading-overlay" style={{
             position: 'absolute',
             inset: 0,
