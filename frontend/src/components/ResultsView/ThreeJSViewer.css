@@ -1,8 +1,30 @@
 .threejs-viewer {
   padding: 1rem;
-  background-color: #1a1a1a;
+  background: #101418;
   border-radius: 8px;
   margin-bottom: 1.5rem;
+  border: 1px solid #1e2630;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.threejs-viewer--step {
+  padding: 0;
+  margin-bottom: 1rem;
+}
+
+.threejs-viewer--step .viewer-header {
+  padding: 0.9rem 1rem 0;
+}
+
+.threejs-viewer--step .viewer-canvas {
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
+}
+
+.threejs-viewer--step .pdf-toolbar {
+  border-radius: 0 0 6px 6px;
 }
 
 .viewer-header {
@@ -17,7 +39,7 @@
 .viewer-header h3 {
   margin: 0;
   font-size: 1.2rem;
-  color: #fff;
+  color: #e6edf3;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -26,7 +48,7 @@
 .glb-badge {
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  background-color: #42a5f5;
+  background-color: #1f6feb;
   color: white;
   border-radius: 4px;
   font-weight: normal;
@@ -112,10 +134,10 @@
 .viewer-canvas {
   width: 100%;
   height: 500px;
-  background-color: #0a0a0a;
-  border-radius: 4px;
+  background: #101418;
+  border-radius: 6px;
   overflow: hidden;
-  border: 1px solid #444;
+  border: 1px solid #1f2937;
   position: relative;
   /* Ensure no scrollbars appear on canvas */
   scrollbar-width: none;
@@ -126,12 +148,161 @@
   display: none;
 }
 
+.viewer-hud-panel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  background: rgba(4, 8, 14, 0.9);
+  border: 1px solid rgba(255, 215, 0, 0.22);
+  border-radius: 6px;
+  padding: 9px 13px;
+  backdrop-filter: blur(14px);
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 175px;
+  pointer-events: auto;
+}
+
+.viewer-hud-title {
+  font-size: 7px;
+  color: #3a5566;
+  letter-spacing: 0.16em;
+  border-bottom: 1px solid #1a2a3a;
+  padding-bottom: 5px;
+}
+
+.viewer-hud-title--secondary {
+  border-bottom: none;
+  border-top: 1px solid #1a2a3a;
+  padding-top: 5px;
+  margin-top: 2px;
+  padding-bottom: 0;
+}
+
+.viewer-hud-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border-radius: 4px;
+  padding: 3px 5px;
+  margin: 0 -5px;
+  cursor: crosshair;
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+.viewer-hud-row--active {
+  background: rgba(255, 215, 0, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 215, 0, 0.3);
+}
+
+.viewer-hud-label {
+  font-size: 7px;
+  letter-spacing: 0.07em;
+  width: 62px;
+  flex-shrink: 0;
+  color: #3a5a70;
+  transition: color 0.12s;
+}
+
+.viewer-hud-label--active {
+  color: #ffd700;
+}
+
+.viewer-hud-value {
+  font-size: 12px;
+  font-weight: 700;
+  flex-grow: 1;
+}
+
+.viewer-hud-value--gold {
+  color: #ffd700;
+}
+
+.viewer-hud-value--cyan {
+  color: #00d4ff;
+}
+
+.viewer-hud-metric {
+  font-size: 8px;
+  color: #2a4455;
+  transition: color 0.12s;
+}
+
+.viewer-hud-metric--active {
+  color: #6a9ab0;
+}
+
+.viewer-hud-features {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.viewer-hud-feature {
+  font-size: 9px;
+  color: #7ab0c8;
+  letter-spacing: 0.04em;
+}
+
+.viewer-hud-arrow {
+  font-size: 8px;
+  color: #ffd700;
+  margin-left: 2px;
+}
+
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  flex-shrink: 0;
+  background: rgba(8, 12, 18, 0.97);
+  border-top: 1px solid #1a2a3a;
+  border-radius: 0 0 8px 8px;
+}
+
+.pdf-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: #1e3048;
+  align-self: center;
+  margin: 0 3px;
+}
+
+.pdf-toolbar-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 11px;
+  border-radius: 4px;
+  line-height: 1.3;
+  border: 1px solid #2e4860;
+  background: rgba(18, 26, 38, 0.92);
+  color: #a0c4dc;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.pdf-toolbar-btn--active {
+  font-weight: 700;
+  border-color: #ffd700;
+  background: rgba(255, 215, 0, 0.18);
+  color: #ffd700;
+}
+
 .viewer-legend {
   display: flex;
   gap: 1.5rem;
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #444;
+  border-top: 1px solid #243244;
   flex-wrap: wrap;
 }
 
@@ -140,28 +311,28 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
-  color: #ccc;
+  color: #9fb3c8;
 }
 
 .legend-color {
   width: 20px;
   height: 20px;
   border-radius: 4px;
-  border: 1px solid #555;
+  border: 1px solid #334155;
 }
 
 /* Tooltip styles */
 .segment-tooltip {
   position: absolute;
-  background-color: rgba(0, 0, 0, 0.95);
-  color: #fff;
+  background-color: rgba(11, 17, 25, 0.96);
+  color: #e6edf3;
   padding: 0.75rem;
   border-radius: 6px;
   font-size: 0.85rem;
   pointer-events: none;
   z-index: 1000;
-  border: 1px solid #555;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+  border: 1px solid #334155;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
   min-width: 200px;
   max-width: 320px;
   font-family: 'Courier New', monospace;
@@ -174,8 +345,8 @@
   font-weight: bold;
   margin-bottom: 0.5rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #555;
-  color: #00ff00;
+  border-bottom: 1px solid #334155;
+  color: #8ad4ff;
 }
 
 .tooltip-content {
@@ -185,20 +356,20 @@
 }
 
 .tooltip-description {
-  color: #ccc;
+  color: #c7d2de;
   font-size: 0.8rem;
   line-height: 1.4;
   margin-bottom: 0.25rem;
   font-style: italic;
   padding: 0.5rem;
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(148, 163, 184, 0.08);
   border-radius: 4px;
-  border-left: 2px solid #00ff00;
+  border-left: 2px solid #38bdf8;
 }
 
 .tooltip-divider {
   height: 1px;
-  background-color: #555;
+  background-color: #334155;
   margin: 0.5rem 0;
 }
 
@@ -209,12 +380,12 @@
 }
 
 .tooltip-label {
-  color: #aaa;
+  color: #94a3b8;
   font-weight: 500;
 }
 
 .tooltip-value {
-  color: #fff;
+  color: #f8fafc;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

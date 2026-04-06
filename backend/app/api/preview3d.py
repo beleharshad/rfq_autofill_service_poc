@@ -18,12 +18,14 @@ GET /api/v1/jobs/{job_id}/3d-preview/status
 """
 
 import logging
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.services.step_from_stack_service import StepFromStackService
+from app.services.step_analysis_service import StepAnalysisService
 from app.services.step_to_glb_converter import StepToGlbConverter
 from app.services.job_service import JobService
 from app.storage.file_storage import FileStorage
@@ -35,11 +37,28 @@ router = APIRouter()
 _job_service = JobService()
 _file_storage = FileStorage()
 _step_service = StepFromStackService()
+_step_analysis_service = StepAnalysisService()
 _glb_converter = StepToGlbConverter()
 
 
 def _outputs(job_id: str) -> Path:
     return _file_storage.get_outputs_path(job_id)
+
+
+def _load_part_summary(job_id: str) -> dict | None:
+    summary_path = _outputs(job_id) / "part_summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return None
+
+
+def _is_step_uploaded_job(job_id: str) -> bool:
+    summary = _load_part_summary(job_id) or {}
+    source = str(((summary.get("inference_metadata") or {}).get("source") or ""))
+    return source.startswith("uploaded_step")
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +79,7 @@ async def get_3d_preview_status(job_id: str):
     stack_ready = (out / "inferred_stack.json").exists()
     step_ready  = (out / "model.step").exists()
     glb_ready   = (out / "model.glb").exists()
+    step_uploaded = _is_step_uploaded_job(job_id)
 
     # Determine OCC availability (import check only — no heavy init)
     occ_available = False
@@ -74,7 +94,8 @@ async def get_3d_preview_status(job_id: str):
         "stack_ready":    stack_ready,
         "step_ready":     step_ready,
         "glb_ready":      glb_ready,
-        "can_generate":   occ_available and stack_ready and _glb_converter.available,
+        "can_generate":   (step_ready and _glb_converter.available) or (occ_available and stack_ready and _glb_converter.available),
+        "source_mode":    "step_upload" if step_uploaded else "stack_generated",
     }
 
 
@@ -107,10 +128,77 @@ async def get_3d_preview(job_id: str, force: bool = False, bore_diameter: float 
 
     step_path = out / "model.step"
     glb_path  = out / "model.glb"
+    step_uploaded = _is_step_uploaded_job(job_id)
+
+    # ── STEP-uploaded jobs: preview only the selected body in inch-scaled units ──
+    if step_uploaded and step_path.exists():
+        summary_path = out / "part_summary.json"
+        preview_step_path = out / "selected_body_preview.step"
+        preview_glb_path = out / "selected_body_preview.glb"
+        render_step_path = step_path
+        render_glb_path = preview_glb_path if preview_glb_path.exists() else glb_path
+
+        preview_sources_mtime = step_path.stat().st_mtime
+        if summary_path.exists():
+            preview_sources_mtime = max(preview_sources_mtime, summary_path.stat().st_mtime)
+
+        try:
+            if force or not preview_step_path.exists() or preview_step_path.stat().st_mtime < preview_sources_mtime:
+                info = _step_analysis_service.export_selected_body_preview_step(
+                    job_id,
+                    source_step_path=step_path,
+                    output_step_path=preview_step_path,
+                )
+                logger.info(
+                    "[3d-preview] Built selected-body preview STEP for %s (body=%s scale=%s)",
+                    job_id,
+                    info.get("selected_body_index"),
+                    info.get("scale_applied"),
+                )
+            render_step_path = preview_step_path
+            render_glb_path = preview_glb_path
+        except Exception as exc:
+            logger.warning(
+                "[3d-preview] Falling back to original uploaded STEP for %s: %s",
+                job_id,
+                exc,
+            )
+            render_step_path = step_path
+            render_glb_path = glb_path
+
+        if not force and render_glb_path.exists() and render_step_path.exists():
+            step_mt = render_step_path.stat().st_mtime
+            glb_mt = render_glb_path.stat().st_mtime
+            if glb_mt >= step_mt:
+                logger.info(f"[3d-preview] Serving cached GLB for {job_id}")
+                return FileResponse(
+                    str(render_glb_path),
+                    media_type="model/gltf-binary",
+                    filename="model.glb",
+                )
+
+        logger.info(f"[3d-preview] Using uploaded STEP as preview source for {job_id}")
+        ok, err = _glb_converter.convert_step_to_glb(render_step_path, render_glb_path, check_cache=not force)
+
+        if not ok:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "unavailable",
+                    "reason": f"STEP→GLB conversion failed: {err}. "
+                              "Install 'trimesh' (pip install trimesh) to enable GLB export.",
+                },
+            )
+
+        return FileResponse(
+            str(render_glb_path),
+            media_type="model/gltf-binary",
+            filename="model.glb",
+        )
 
     # Fast path: GLB already cached and not forced
     # bore_diameter changes invalidate the cache so the solid is rebuilt with the correct bore.
-    force_rebuild = force or (bore_diameter > 0.001)
+    force_rebuild = force or ((bore_diameter > 0.001) and not step_uploaded)
     if not force_rebuild and glb_path.exists() and step_path.exists():
         step_mt = step_path.stat().st_mtime
         glb_mt  = glb_path.stat().st_mtime
@@ -123,7 +211,7 @@ async def get_3d_preview(job_id: str, force: bool = False, bore_diameter: float 
             )
 
     # When bore override is active, delete stale step/glb so we start fresh.
-    if bore_diameter > 0.001:
+    if bore_diameter > 0.001 and not step_uploaded:
         for stale in (step_path, glb_path):
             if stale.exists():
                 logger.info(f"[3d-preview] Removing stale cache file: {stale.name}")

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.geometry.feature_extractor import FeatureExtractor, OCC_AVAILABLE
 from app.services import llm_service
@@ -17,12 +18,14 @@ from app.services.step_to_glb_converter import StepToGlbConverter
 from app.storage.file_storage import FileStorage
 
 try:
+	from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
 	from OCC.Core.BRepBndLib import brepbndlib_Add
 	from OCC.Core.Bnd import Bnd_Box
 	from OCC.Core.IFSelect import IFSelect_RetDone
-	from OCC.Core.STEPControl import STEPControl_Reader
-	from OCC.Core.TopAbs import TopAbs_FACE
+	from OCC.Core.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
+	from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SOLID
 	from OCC.Core.TopExp import TopExp_Explorer
+	from OCC.Core.gp import gp_Pnt, gp_Trsf
 
 	_STEP_READER_AVAILABLE = True
 except ImportError:
@@ -33,7 +36,8 @@ _STEP_ANALYSIS_PROMPT = """\
 You are analyzing a STEP CAD model summary, not a PDF drawing and not OCR text.
 
 Your job is to extract manufacturing-relevant dimensions from CAD geometry only.
-Use ONLY the provided STEP metadata, geometry summary, and deterministic candidates.
+You are given ONE selected body summary plus a short list of alternative bodies.
+Use ONLY the provided STEP metadata, selected-body geometry summary, alternative-body shortlist, and deterministic candidates.
 
 Do NOT invent or guess:
 - material
@@ -80,26 +84,24 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Geometry-first rules:
-1. `od_in`
-	 - Use the largest finished outer diameter visible in the STEP-derived geometry summary.
+1. Use the selected body as the primary source of OD / ID / length.
+2. Treat the alternative-body shortlist as comparison context only. Do not blend dimensions across bodies.
+3. `od_in`
+	 - Use the largest finished outer diameter visible in the selected-body geometry summary.
 	 - Prefer segment OD values / totals over file-name heuristics.
-
-2. `length_in`
-	 - Use the full finished axial span from the geometry summary.
+4. `length_in`
+	 - Use the full finished axial span from the selected-body geometry summary.
 	 - Do not confuse local feature lengths with overall part length.
-
-3. `id_in` and `max_id_in`
-	 - Consider only positive internal bore diameters.
+5. `id_in` and `max_id_in`
+	 - Consider only positive internal bore diameters from the selected body.
 	 - If one positive bore exists: `id_in = max_id_in = that bore`.
 	 - If multiple positive bores exist: `id_in = smallest`, `max_id_in = largest`.
 	 - If no positive bore exists, both should be null.
-
-4. `max_od_in` and `max_length_in`
+6. `max_od_in` and `max_length_in`
 	 - STEP files usually describe finished geometry, not raw stock.
 	 - If no explicit raw-stock information exists, set `max_od_in = od_in` and `max_length_in = length_in`.
 	 - Mention this fallback in `cross_checks` and the affected field `issue`.
-
-5. Metadata fields
+7. Metadata fields
 	 - `part_number` may come from a trustworthy STEP product id or file stem.
 	 - `part_name` may come from a trustworthy STEP product name or file stem.
 	 - Keep unsupported metadata null.
@@ -110,21 +112,20 @@ Metadata quality rules:
 - Do not blindly trust internal CAD-export identifiers as customer-facing part names.
 
 Multi-body / assembly rules:
-- If the STEP metadata suggests multiple solids or a top-level assembly-like context, do NOT assume a simple single turned component.
-- In that case, still extract available geometry-derived dimensions, but lower confidence and prefer `REVIEW`.
-- Mention multi-body / assembly suspicion in `cross_checks`.
+- If multiple solids exist, trust the selected body but mention ambiguity when alternate candidates are plausible.
+- If the selection score is weak or alternatives are close, prefer `REVIEW`.
 
 Validation rules:
 - Reject impossible geometry such as `id_in >= od_in` when both exist.
 - Review when only fallback / bbox-style data is available.
 - Review when the STEP appears to be a multi-body or assembly-like export rather than one clean turned part.
-- Accept when geometry-derived values are internally consistent.
+- Accept when geometry-derived values are internally consistent and the selected body is clearly dominant.
 - Prefer deterministic candidates when they already satisfy the rules.
 
 STEP METADATA:
 {metadata_json}
 
-STEP GEOMETRY SUMMARY:
+SELECTED BODY + ALTERNATIVES:
 {geometry_json}
 
 DETERMINISTIC CANDIDATES:
@@ -190,6 +191,75 @@ class StepAnalysisService:
 			"glb_generated": glb_path.exists(),
 		}
 
+	def export_selected_body_preview_step(
+		self,
+		job_id: str,
+		source_step_path: Optional[Path] = None,
+		output_step_path: Optional[Path] = None,
+	) -> Dict[str, Any]:
+		"""Export the selected STEP body as an inch-scaled preview STEP.
+
+		This keeps STEP-backed 3D previews aligned with the selected-body summary that
+		the frontend uses for camera framing and feature overlays.
+		"""
+		if not _STEP_READER_AVAILABLE or not OCC_AVAILABLE:
+			raise RuntimeError("Selected-body STEP preview requires pythonocc-core on the backend")
+
+		outputs_path = self.file_storage.get_outputs_path(job_id)
+		source_step = source_step_path or (outputs_path / "model.step")
+		preview_step = output_step_path or (outputs_path / "selected_body_preview.step")
+		part_summary_path = outputs_path / "part_summary.json"
+
+		if not source_step.exists():
+			raise FileNotFoundError(f"Source STEP not found for preview: {source_step}")
+		if not part_summary_path.exists():
+			raise FileNotFoundError(f"part_summary.json not found for preview: {part_summary_path}")
+
+		part_summary = json.loads(part_summary_path.read_text(encoding="utf-8-sig"))
+		selected_body = part_summary.get("selected_body") or {}
+		selected_body_index = int(
+			selected_body.get("body_index")
+			or (part_summary.get("inference_metadata") or {}).get("selected_body_index")
+			or 0
+		)
+
+		shape = self._read_step_shape(source_step)
+		solids = self._extract_solids(shape)
+		if not solids:
+			raise RuntimeError(f"No solid bodies found in STEP file: {source_step.name}")
+		if selected_body_index < 0 or selected_body_index >= len(solids):
+			raise RuntimeError(
+				f"Selected body index {selected_body_index} is out of range for {len(solids)} solid(s)"
+			)
+
+		preview_shape = solids[selected_body_index]
+		unit_label, scale_to_in, unit_note = self._detect_length_unit(source_step)
+		scale_applied = 1.0
+		if abs(scale_to_in - 1.0) > 1e-9:
+			trsf = gp_Trsf()
+			trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale_to_in)
+			transform = BRepBuilderAPI_Transform(preview_shape, trsf, True)
+			transform.Build()
+			preview_shape = transform.Shape()
+			scale_applied = scale_to_in
+
+		preview_step.parent.mkdir(parents=True, exist_ok=True)
+		writer = STEPControl_Writer()
+		transfer_result = writer.Transfer(preview_shape, STEPControl_AsIs)
+		if transfer_result != IFSelect_RetDone:
+			raise RuntimeError(f"Failed to transfer selected STEP body {selected_body_index} for preview export")
+		write_result = writer.Write(str(preview_step))
+		if write_result != IFSelect_RetDone:
+			raise RuntimeError(f"Failed to write selected-body preview STEP: {preview_step}")
+
+		return {
+			"preview_step_path": str(preview_step),
+			"selected_body_index": selected_body_index,
+			"input_unit": unit_label,
+			"scale_applied": scale_applied,
+			"unit_note": unit_note,
+		}
+
 	def analyze_step_job(self, job_id: str, step_input_path: Path) -> Dict[str, Any]:
 		"""Run a STEP-aware analysis prompt for an uploaded STEP/STP job."""
 		outputs_path = self.file_storage.get_outputs_path(job_id)
@@ -211,7 +281,7 @@ class StepAnalysisService:
 
 		prompt = _STEP_ANALYSIS_PROMPT.format(
 			metadata_json=json.dumps(metadata, indent=2),
-			geometry_json=json.dumps(part_summary, indent=2),
+			geometry_json=json.dumps(self._build_llm_geometry_payload(part_summary), indent=2),
 			candidate_json=json.dumps(deterministic.get("extracted", {}), indent=2),
 		)
 
@@ -239,13 +309,22 @@ class StepAnalysisService:
 		if not _STEP_READER_AVAILABLE or not OCC_AVAILABLE:
 			raise RuntimeError("STEP analysis requires pythonocc-core on the backend")
 
-		solid = self._read_step_solid(step_path)
-		try:
-			return self._build_feature_summary(solid, scale_to_in, unit_label, unit_note, metadata)
-		except Exception:
-			return self._build_bbox_summary(solid, scale_to_in, unit_label, unit_note, metadata)
+		shape = self._read_step_shape(step_path)
+		solids = self._extract_solids(shape)
+		if not solids:
+			raise RuntimeError(f"No solid bodies found in STEP file: {step_path.name}")
 
-	def _read_step_solid(self, step_path: Path):
+		body_candidates = self._analyze_body_candidates(
+			solids,
+			scale_to_in,
+			unit_label,
+			unit_note,
+			metadata,
+		)
+		selected = self._select_dominant_body(body_candidates)
+		return self._build_selected_body_summary(metadata, body_candidates, selected)
+
+	def _read_step_shape(self, step_path: Path):
 		reader = STEPControl_Reader()
 		status = reader.ReadFile(str(step_path))
 		if status != IFSelect_RetDone:
@@ -255,6 +334,100 @@ class StepAnalysisService:
 		if shape is None or shape.IsNull():
 			raise RuntimeError(f"STEP file produced an empty shape: {step_path.name}")
 		return shape
+
+	def _extract_solids(self, shape) -> List[Any]:
+		solids: List[Any] = []
+		explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+		while explorer.More():
+			solids.append(explorer.Current())
+			explorer.Next()
+		if not solids and hasattr(shape, "ShapeType") and shape.ShapeType() == TopAbs_SOLID:
+			solids.append(shape)
+		return solids
+
+	def _analyze_body_candidates(
+		self,
+		solids: List[Any],
+		scale_to_in: float,
+		unit_label: str,
+		unit_note: str,
+		metadata: Dict[str, Any],
+	) -> List[Dict[str, Any]]:
+		candidates: List[Dict[str, Any]] = []
+		for index, solid in enumerate(solids):
+			extraction_method = "feature"
+			summary_error = None
+			try:
+				summary = self._build_feature_summary(solid, scale_to_in, unit_label, unit_note, metadata)
+			except Exception as exc:
+				extraction_method = "bbox"
+				summary_error = str(exc)
+				summary = self._build_bbox_summary(solid, scale_to_in, unit_label, unit_note, metadata)
+
+			summary = copy.deepcopy(summary)
+			summary.setdefault("inference_metadata", {})
+			summary["inference_metadata"]["body_index"] = index
+			summary["inference_metadata"]["body_count"] = len(solids)
+			summary["inference_metadata"]["source"] = (
+				"uploaded_step_body" if extraction_method == "feature" else "uploaded_step_body_bbox_fallback"
+			)
+
+			score, reasons = self._score_body_candidate(summary, extraction_method)
+			candidate = self._build_compact_candidate(index, summary, extraction_method, score, reasons)
+			if summary_error:
+				candidate["analysis_warning"] = summary_error
+			candidates.append(
+				{
+					"body_index": index,
+					"score": score,
+					"selection_reasons": reasons,
+					"extraction_method": extraction_method,
+					"summary": summary,
+					"compact": candidate,
+				}
+			)
+		return candidates
+
+	def _select_dominant_body(self, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+		if not candidates:
+			raise RuntimeError("No STEP body candidates were analyzed")
+		return max(candidates, key=lambda candidate: float(candidate.get("score") or float("-inf")))
+
+	def _build_selected_body_summary(
+		self,
+		metadata: Dict[str, Any],
+		candidates: List[Dict[str, Any]],
+		selected: Dict[str, Any],
+	) -> Dict[str, Any]:
+		selected_summary = copy.deepcopy(selected["summary"])
+		selected_compact = copy.deepcopy(selected["compact"])
+		body_candidates = [copy.deepcopy(candidate["compact"]) for candidate in candidates]
+		selected_body_index = int(selected_compact.get("body_index") or 0)
+
+		selected_summary.setdefault("inference_metadata", {})
+		selected_summary["inference_metadata"]["source"] = (
+			"uploaded_step_selected_body"
+			if selected.get("extraction_method") == "feature"
+			else "uploaded_step_selected_body_bbox_fallback"
+		)
+		selected_summary["inference_metadata"]["selected_body_index"] = selected_body_index
+		selected_summary["inference_metadata"]["body_count"] = len(body_candidates)
+
+		warnings: List[str] = []
+		if len(body_candidates) > 1:
+			warnings.append(
+				f"Detected {len(body_candidates)} solid bodies in the STEP file; selected body {selected_body_index} as the dominant turned candidate."
+			)
+
+		selected_summary["selected_body"] = selected_compact
+		selected_summary["body_candidates"] = body_candidates
+		selected_summary["warnings"] = warnings
+		selected_summary["step_metadata"] = {
+			"file_name": metadata.get("file_name"),
+			"representation_context": metadata.get("representation_context"),
+			"body_count": metadata.get("body_count"),
+		}
+		return selected_summary
 
 	def _build_feature_summary(
 		self,
@@ -346,7 +519,7 @@ class StepAnalysisService:
 			"inference_metadata": {
 				"mode": "auto_detect",
 				"overall_confidence": 1.0,
-				"source": "uploaded_step",
+				"source": "uploaded_step_body",
 				"input_unit": unit_label,
 				"file_name": metadata.get("file_name"),
 			},
@@ -417,9 +590,105 @@ class StepAnalysisService:
 			"inference_metadata": {
 				"mode": "auto_detect",
 				"overall_confidence": 0.7,
-				"source": "uploaded_step_bbox_fallback",
+				"source": "uploaded_step_body_bbox_fallback",
 				"input_unit": unit_label,
 				"file_name": metadata.get("file_name"),
+			},
+		}
+
+	def _score_body_candidate(
+		self,
+		summary: Dict[str, Any],
+		extraction_method: str,
+	) -> Tuple[float, List[str]]:
+		totals = summary.get("totals") or {}
+		feature_counts = summary.get("feature_counts") or {}
+		segments = summary.get("segments") or []
+
+		length_in = float(totals.get("total_length_in") or 0.0)
+		max_od_in = float(totals.get("max_od_in") or 0.0)
+		volume_in3 = float(totals.get("volume_in3") or 0.0)
+		external_cylinders = int(feature_counts.get("external_cylinders") or 0)
+		internal_bores = int(feature_counts.get("internal_bores") or 0)
+		planar_faces = int(feature_counts.get("planar_faces") or 0)
+		segment_count = len(segments)
+
+		score = 0.0
+		reasons: List[str] = []
+
+		if extraction_method == "feature":
+			score += 18.0
+			reasons.append("Feature extraction succeeded for this body.")
+		else:
+			score -= 10.0
+			reasons.append("Only bounding-box fallback was available for this body.")
+
+		if length_in > 0:
+			score += min(length_in, 40.0) * 0.6
+			reasons.append(f"Positive axial span detected ({length_in:.3f} in).")
+		else:
+			score -= 40.0
+
+		if max_od_in > 0:
+			score += min(max_od_in, 20.0) * 1.5
+			reasons.append(f"Positive OD detected ({max_od_in:.3f} in).")
+
+		if volume_in3 > 0:
+			score += min(math.log1p(volume_in3) * 6.0, 20.0)
+
+		if external_cylinders > 0:
+			score += min(external_cylinders, 6) * 5.0
+			reasons.append(f"Contains {external_cylinders} external cylindrical feature(s).")
+		else:
+			score -= 12.0
+
+		if internal_bores > 0:
+			score += min(internal_bores, 4) * 3.0
+			reasons.append(f"Contains {internal_bores} internal bore feature(s).")
+
+		if segment_count > 0:
+			score += min(segment_count, 12) * 3.0
+			reasons.append(f"Built {segment_count} turned stack segment(s).")
+
+		if planar_faces >= 2:
+			score += 2.0
+
+		return round(score, 4), reasons[:4]
+
+	def _build_compact_candidate(
+		self,
+		body_index: int,
+		summary: Dict[str, Any],
+		extraction_method: str,
+		score: float,
+		reasons: List[str],
+	) -> Dict[str, Any]:
+		totals = summary.get("totals") or {}
+		segments = summary.get("segments") or []
+		ids = [float(seg.get("id_diameter") or 0.0) for seg in segments if float(seg.get("id_diameter") or 0.0) > 0]
+		return {
+			"body_index": body_index,
+			"score": score,
+			"extraction_method": extraction_method,
+			"segment_count": len(segments),
+			"selection_reasons": reasons,
+			"dimensions": {
+				"od_in": float(totals.get("max_od_in") or 0.0) or None,
+				"id_in": min(ids) if ids else None,
+				"max_id_in": max(ids) if ids else None,
+				"length_in": float(totals.get("total_length_in") or 0.0) or None,
+			},
+			"z_range": summary.get("z_range"),
+			"totals": {
+				"volume_in3": totals.get("volume_in3"),
+				"max_od_in": totals.get("max_od_in"),
+				"max_id_in": totals.get("max_id_in"),
+				"total_length_in": totals.get("total_length_in"),
+			},
+			"feature_counts": copy.deepcopy(summary.get("feature_counts") or {}),
+			"inference_metadata": {
+				"source": (summary.get("inference_metadata") or {}).get("source"),
+				"overall_confidence": (summary.get("inference_metadata") or {}).get("overall_confidence"),
 			},
 		}
 
@@ -452,6 +721,27 @@ class StepAnalysisService:
 			return "m", 39.37007874015748, "Detected STEP length unit: metre"
 		return "unknown", 1.0, "STEP length unit not found in header; assumed inches"
 
+	def _build_llm_geometry_payload(self, part_summary: Dict[str, Any]) -> Dict[str, Any]:
+		selected_body = copy.deepcopy(part_summary.get("selected_body") or {})
+		selected_summary = {
+			"z_range": part_summary.get("z_range"),
+			"segments": part_summary.get("segments"),
+			"totals": part_summary.get("totals"),
+			"feature_counts": part_summary.get("feature_counts"),
+			"inference_metadata": part_summary.get("inference_metadata"),
+		}
+		alternatives = [
+			candidate
+			for candidate in (part_summary.get("body_candidates") or [])
+			if int(candidate.get("body_index") or -1) != int(selected_body.get("body_index") or -1)
+		][:3]
+		return {
+			"selected_body": selected_body,
+			"selected_body_summary": selected_summary,
+			"alternative_bodies": alternatives,
+			"warnings": part_summary.get("warnings") or [],
+		}
+
 	def _build_deterministic_result(self, step_path: Path, part_summary: Dict[str, Any]) -> Dict[str, Any]:
 		metadata = self._extract_step_metadata(step_path)
 		totals = part_summary.get("totals") or {}
@@ -469,6 +759,9 @@ class StepAnalysisService:
 		product_name = metadata.get("product_name")
 		body_count = int(metadata.get("body_count") or 0)
 		representation_context = str(metadata.get("representation_context") or "")
+		selected_body = part_summary.get("selected_body") or {}
+		selected_body_index = selected_body.get("body_index")
+		candidate_count = len(part_summary.get("body_candidates") or [])
 		part_number = file_stem if _looks_generic_step_name(product_id) else (product_id or file_stem)
 		part_name = file_stem if _looks_generic_step_name(product_name) else (product_name or file_stem)
 
@@ -494,6 +787,16 @@ class StepAnalysisService:
 			"Analyzed from uploaded STEP geometry rather than PDF OCR.",
 			"Raw material dimensions are not present in STEP; max_od_in and max_length_in default to finish dimensions.",
 		]
+		if selected_body_index is not None:
+			cross_checks.append(
+				f"Selected STEP body {selected_body_index} as the dominant turned/revolved candidate for dimension extraction."
+			)
+			if selected_body.get("selection_reasons"):
+				cross_checks.extend(str(reason) for reason in selected_body.get("selection_reasons")[:3])
+		if candidate_count > 1:
+			cross_checks.append(
+				f"Compared {candidate_count} body candidates and used only the selected body dimensions for OD / ID / length."
+			)
 		if _looks_generic_step_name(product_id) or _looks_generic_step_name(product_name):
 			cross_checks.append(
 				"STEP product metadata looked autogenerated or low-trust; used the file stem as the preferred human-readable identifier."
@@ -521,8 +824,15 @@ class StepAnalysisService:
 		}
 
 		code_issues = self._build_code_issues(extracted)
-		assembly_like = body_count > 1 or "ASSEMBLY" in representation_context.upper()
-		recommendation = "ACCEPT" if not assembly_like and not code_issues and od_in and length_in else "REVIEW"
+		assembly_like = body_count > 1 or "ASSEMBLY" in representation_context.upper() or candidate_count > 1
+		selected_score = float(selected_body.get("score") or 0.0)
+		close_alternatives = False
+		body_candidates = part_summary.get("body_candidates") or []
+		if len(body_candidates) > 1:
+			sorted_scores = sorted((float(candidate.get("score") or 0.0) for candidate in body_candidates), reverse=True)
+			if len(sorted_scores) > 1 and (sorted_scores[0] - sorted_scores[1]) < 8.0:
+				close_alternatives = True
+		recommendation = "ACCEPT" if not assembly_like and not close_alternatives and not code_issues and od_in and length_in and selected_score >= 20.0 else "REVIEW"
 
 		return {
 			"pdf_text_length": 0,
@@ -531,7 +841,7 @@ class StepAnalysisService:
 			"extracted": extracted,
 			"validation": {
 				"recommendation": recommendation,
-				"overall_confidence": 0.95 if recommendation == "ACCEPT" else (0.6 if assembly_like else 0.7),
+				"overall_confidence": 0.95 if recommendation == "ACCEPT" else (0.58 if close_alternatives else (0.6 if assembly_like else 0.72)),
 				"fields": fields,
 				"cross_checks": cross_checks,
 			},

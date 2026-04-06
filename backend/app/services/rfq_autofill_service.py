@@ -1890,11 +1890,15 @@ class RFQAutofillService:
         rm_len_in = r3(rm_len_in)
 
         # Extract features for time-based estimates
-        features = part_summary.get("features") if isinstance(part_summary, dict) else None
+        features, used_feature_count_proxy = self._build_time_estimation_features(
+            part_summary if isinstance(part_summary, dict) else {},
+            finish_id_in,
+            rm_len_in,
+        )
         has_features = isinstance(features, dict) and features
 
         # Validate feature quality if we have a job_id
-        if isinstance(job_id, str) and job_id.strip() and has_features:
+        if isinstance(job_id, str) and job_id.strip() and has_features and not used_feature_count_proxy:
             try:
                 feature_quality = self.feature_detection_service.validate_feature_quality(job_id.strip())
                 # Add quality issues as reasons
@@ -2039,6 +2043,9 @@ class RFQAutofillService:
                 vmc_minutes = 0.0
 
                 if has_features:
+                    if used_feature_count_proxy:
+                        _add_reason("INTERNAL_BORE_TIME_PROXY")
+
                     # Drilling time calculation
                     drilling_minutes = self._calculate_drilling_time(features, rm_len)
                     if drilling_minutes > 0:
@@ -2117,10 +2124,12 @@ class RFQAutofillService:
                 milling_cost_field = None
                 vmc_minutes_field = None
                 vmc_cost_field = None
+                drilling_time_source = "feature_counts.internal_bores_time" if used_feature_count_proxy else "features.holes_time"
+                drilling_cost_source = "feature_counts.time_x_rate" if used_feature_count_proxy else "features.time_x_rate"
 
                 if drilling_minutes > 0:
-                    drilling_minutes_field = _fv(r3(drilling_minutes), feature_time_conf, "features.holes_time")
-                    drilling_cost_field = _fv(r3(drilling_cost), feature_time_conf, "features.time_x_rate")
+                    drilling_minutes_field = _fv(r3(drilling_minutes), feature_time_conf, drilling_time_source)
+                    drilling_cost_field = _fv(r3(drilling_cost), feature_time_conf, drilling_cost_source)
 
                 if milling_minutes > 0:
                     milling_minutes_field = _fv(r3(milling_minutes), feature_time_conf, "features.slots_time")
@@ -2319,6 +2328,86 @@ class RFQAutofillService:
         )
 
 
+    def _build_time_estimation_features(
+        self,
+        part_summary: Dict[str, Any],
+        finish_id_in: Optional[float],
+        rm_len: float,
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """Return detailed features when available, else synthesize a drilling proxy.
+
+        STEP-backed jobs currently always provide `feature_counts`, but many do not yet
+        persist detailed `features.holes` / `features.slots` arrays. When that happens,
+        use the detected internal bore count as a conservative drilling proxy so RFQ
+        export can still populate drilling time/cost columns.
+        """
+        if not isinstance(part_summary, dict):
+            return None, False
+
+        features = part_summary.get("features")
+        if isinstance(features, dict) and features:
+            return features, False
+
+        feature_counts = part_summary.get("feature_counts") or {}
+        if not feature_counts:
+            selected_body = part_summary.get("selected_body") or {}
+            if isinstance(selected_body, dict):
+                feature_counts = selected_body.get("feature_counts") or {}
+
+        internal_bores = int(_as_float(feature_counts.get("internal_bores")) or 0)
+        if internal_bores <= 0:
+            return None, False
+
+        positive_ids: List[float] = []
+        bore_spans: List[float] = []
+        for seg in part_summary.get("segments") or []:
+            if not isinstance(seg, dict):
+                continue
+            diameter = _as_float(seg.get("id_diameter"))
+            z_start = _as_float(seg.get("z_start"))
+            z_end = _as_float(seg.get("z_end"))
+            if diameter is None or diameter <= 0.0:
+                continue
+            positive_ids.append(float(diameter))
+            if z_start is None or z_end is None:
+                continue
+            span = abs(float(z_end) - float(z_start))
+            if span >= 0.05:
+                bore_spans.append(span)
+
+        representative_diameter = min(positive_ids) if positive_ids else (_as_float(finish_id_in) or 0.125)
+        bore_spans.sort()
+        if bore_spans:
+            representative_depth = bore_spans[len(bore_spans) // 2]
+        else:
+            representative_depth = min(max(float(rm_len or 0.0) * 0.25, 0.25), float(rm_len or 0.25))
+
+        rm_len_val = max(float(_as_float(rm_len) or 0.0), 0.0)
+        if rm_len_val > 0.0:
+            representative_depth = min(representative_depth, rm_len_val)
+        representative_depth = max(representative_depth, 0.125)
+
+        proxy_features = {
+            "holes": [
+                {
+                    "diameter": float(representative_diameter),
+                    "depth": float(representative_depth),
+                    "kind": "axial",
+                    "count": internal_bores,
+                    "confidence": 0.8,
+                }
+            ],
+            "slots": [],
+            "chamfers": [],
+            "fillets": [],
+            "threads": [],
+            "meta": {
+                "source": "feature_counts.internal_bores",
+                "internal_bore_count": internal_bores,
+            },
+        }
+        return proxy_features, True
+
     def _calculate_drilling_time(self, features: Dict[str, Any], rm_len: float) -> float:
         """
         Calculate drilling time based on detected holes.
@@ -2357,8 +2446,8 @@ class RFQAutofillService:
             if confidence is not None and float(confidence) > 0.0 and float(confidence) < min_confidence:
                 continue
 
-            # Base time per hole (setup + positioning)
-            base_time_per_hole = 0.5  # 0.5 minutes setup per hole
+            # Base time per hole (positioning / tool touch-off)
+            base_time_per_hole = 0.5
             
             # Estimate hole depth if not provided
             # For through holes, assume depth = RM length (worst case)
@@ -2383,13 +2472,15 @@ class RFQAutofillService:
             elif kind == "cross":
                 drilling_time *= 1.0  # Standard cross hole
 
-            # Apply setup time once per pattern (not per hole)
+            total_time_per_hole = base_time_per_hole + drilling_time
+            operation_minutes = total_time_per_hole * float(count)
+
+            # Apply pattern setup once, not once per repeated hole count.
             if not setup_applied:
-                base_time_per_hole += 1.0  # Additional setup for first hole
+                operation_minutes += 1.0
                 setup_applied = True
 
-            total_time_per_hole = base_time_per_hole + drilling_time
-            total_minutes += total_time_per_hole * float(count)
+            total_minutes += operation_minutes
 
         return total_minutes
 
@@ -2451,13 +2542,15 @@ class RFQAutofillService:
             # Minimum time per slot
             milling_time = max(milling_time, 1.0)
 
-            # Apply setup time once per pattern
+            total_time_per_slot = base_time_per_slot + milling_time
+            operation_minutes = total_time_per_slot * float(count)
+
+            # Apply pattern setup once, not once per repeated slot count.
             if not setup_applied:
-                base_time_per_slot += 2.0  # Additional setup for first slot
+                operation_minutes += 2.0
                 setup_applied = True
 
-            total_time_per_slot = base_time_per_slot + milling_time
-            total_minutes += total_time_per_slot * float(count)
+            total_minutes += operation_minutes
 
         return total_minutes
 

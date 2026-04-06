@@ -67,7 +67,7 @@ function makeBlobResponse(content: string, filename: string, status = 200): Resp
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
-let fetchMock: ReturnType<typeof vi.spyOn>;
+let fetchMock: any;
 
 beforeEach(() => {
   fetchMock = vi.spyOn(globalThis, 'fetch');
@@ -272,7 +272,8 @@ describe('api.rfqExportXlsx', () => {
       })
     );
     await api.rfqExportXlsx(PAYLOAD, 'master');
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit | undefined;
+    const body = JSON.parse(String(requestInit?.body ?? '{}'));
     expect(body.rfq_id).toBe(JOB_ID);
     expect(body.part_no).toBe('050CE0004');
   });
@@ -289,6 +290,26 @@ describe('api.rfqExportXlsx', () => {
       makeJsonResponse({ detail: 'Export failed: model not found' }, 422)
     );
     await expect(api.rfqExportXlsx(PAYLOAD, 'master')).rejects.toThrow('Export failed');
+  });
+});
+
+// ==========================================================================
+// 4. fetch3dPreviewBlobUrl
+// ==========================================================================
+
+describe('api.fetch3dPreviewBlobUrl', () => {
+  it('fetches the preview endpoint and returns a blob URL on success', async () => {
+    fetchMock.mockResolvedValueOnce(makeBlobResponse('glb-binary', 'model.glb'));
+    const url = await api.fetch3dPreviewBlobUrl(JOB_ID);
+    expect(typeof url).toBe('string');
+    expect(url.startsWith('blob:')).toBe(true);
+    const calledUrl = fetchMock.mock.calls[0][0] as string;
+    expect(calledUrl).toContain(`/jobs/${JOB_ID}/3d-preview`);
+  });
+
+  it('surfaces backend preview reason when the preview endpoint fails', async () => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: { reason: 'STEP→GLB conversion failed' } }, 503));
+    await expect(api.fetch3dPreviewBlobUrl(JOB_ID)).rejects.toThrow('STEP→GLB conversion failed');
   });
 });
 

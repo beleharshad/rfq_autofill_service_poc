@@ -583,6 +583,73 @@ def _build_header_map(ws, header_row: int) -> Dict[str, int]:
     return headers
 
 
+_EXPORT_HEADER_ORDER = [
+    ("Turning cost", "Drilling Time In Min"),
+    ("Drilling Time In Min", "Drilling Cost"),
+    ("Drilling Cost", "Milling Time In Min"),
+    ("Milling Time In Min", "Milling Cost"),
+    ("VMC cost", "Special Process Cost"),
+    ("Special Process Cost", "Others"),
+    ("Others", "Inspection and testing Cost"),
+    ("Currency", "Exchange Rate"),
+    ("Annual Potential Qty", "Annual Potential"),
+    ("Price/Each In Currency", "MOQ Cost"),
+]
+
+
+def _ensure_export_headers_present(
+    ws,
+    header_map: Dict[str, int],
+    *,
+    header_row: int,
+    key_row: Optional[int] = None,
+) -> None:
+    key_labels = {
+        "Drilling Time In Min": "drilling_time_min",
+        "Drilling Cost": "drilling_cost",
+        "Milling Time In Min": "milling_time_min",
+        "Milling Cost": "milling_cost",
+        "Special Process Cost": "special_process_cost",
+        "Others": "others_cost",
+        "Inspection and testing Cost": "inspection_testing_cost",
+        "Exchange Rate": "exchange_rate",
+        "Annual Potential": "annual_potential",
+        "MOQ Cost": "moq_cost",
+    }
+
+    for after_header, new_header in _EXPORT_HEADER_ORDER:
+        new_key = _norm(new_header)
+        if new_key in header_map:
+            continue
+
+        after_col = header_map.get(_norm(after_header))
+        insert_at = (after_col + 1) if after_col else (ws.max_column + 1)
+        ws.insert_cols(insert_at)
+
+        for existing_key, existing_col in list(header_map.items()):
+            if existing_col >= insert_at:
+                header_map[existing_key] = existing_col + 1
+
+        hdr_cell = ws.cell(row=header_row, column=insert_at, value=new_header)
+        src_col = insert_at - 1 if insert_at > 1 else insert_at
+        src_cell = ws.cell(row=header_row, column=src_col)
+        try:
+            hdr_cell.font = src_cell.font
+            hdr_cell.fill = src_cell.fill
+            hdr_cell.alignment = src_cell.alignment
+            hdr_cell.border = src_cell.border
+            hdr_cell.number_format = src_cell.number_format
+            hdr_cell.protection = src_cell.protection
+        except Exception:
+            pass
+
+        header_map[new_key] = insert_at
+
+        key_label = key_labels.get(new_header)
+        if key_row and key_label:
+            ws.cell(row=key_row, column=insert_at).value = key_label
+
+
 def _find_or_append_part_row(ws, header_row: int, part_no: str, part_col: int, srno_col: Optional[int]) -> int:
     target = _norm(part_no)
     # Scan existing rows
@@ -684,6 +751,7 @@ def write_autofill_to_rfq_template(
 
     header_row = HEADER_ROW
     header_map = _build_header_map(ws, header_row=header_row)
+    _ensure_export_headers_present(ws, header_map, header_row=header_row, key_row=KEY_ROW)
 
     # Required columns by reference sheet
     part_col = header_map.get(_norm("Part No"))
@@ -1007,6 +1075,7 @@ def write_autofill_to_master_file(
 
     header_row = HEADER_ROW
     header_map = _build_header_map(ws, header_row=header_row)
+    _ensure_export_headers_present(ws, header_map, header_row=header_row, key_row=KEY_ROW)
 
     # Required columns
     part_col = header_map.get(_norm("Part No"))
@@ -1215,6 +1284,9 @@ def write_autofill_to_master_file(
         set_by_header("Drilling Cost", ev("drilling_cost"))
         set_by_header("Milling Time In Min", ev("milling_minutes"))
         set_by_header("Milling Cost", ev("milling_cost"))
+        set_by_header("Special Process Cost", ev("special_process_cost"))
+        set_by_header("Others", ev("others_cost"))
+        set_by_header("Inspection and testing Cost", ev("inspection_cost"))
         set_by_header("Sub Total", ev("subtotal"))
         set_by_header("P&F", ev("pf_cost"))
         set_by_header("OH & Profit", ev("oh_profit"))
@@ -1309,6 +1381,42 @@ def write_autofill_to_new_file(
 
     header_row = HEADER_ROW
     header_map = _build_header_map(ws, header_row=header_row)
+    _ensure_export_headers_present(ws, header_map, header_row=header_row)
+
+    def ensure_header_after(after_header: str, new_header: str) -> int:
+        """Ensure a header exists in the new-file export, inserting it if needed."""
+        new_key = _norm(new_header)
+        if new_key in header_map:
+            return header_map[new_key]
+
+        after_col = header_map.get(_norm(after_header))
+        insert_at = (after_col + 1) if after_col else (ws.max_column + 1)
+        ws.insert_cols(insert_at)
+
+        for k, c in list(header_map.items()):
+            if c >= insert_at:
+                header_map[k] = c + 1
+
+        hdr_cell = ws.cell(row=HEADER_ROW, column=insert_at, value=new_header)
+        src_col = insert_at - 1 if insert_at > 1 else insert_at
+        src_cell = ws.cell(row=HEADER_ROW, column=src_col)
+        try:
+            hdr_cell.font = src_cell.font
+            hdr_cell.fill = src_cell.fill
+            hdr_cell.alignment = src_cell.alignment
+            hdr_cell.border = src_cell.border
+            hdr_cell.number_format = src_cell.number_format
+            hdr_cell.protection = src_cell.protection
+        except Exception:
+            pass
+
+        header_map[new_key] = insert_at
+        return insert_at
+
+    after = "Turning cost"
+    for hdr in ["Drilling Time In Min", "Drilling Cost", "Milling Time In Min", "Milling Cost"]:
+        ensure_header_after(after, hdr)
+        after = hdr
 
     # Required columns
     part_col = header_map.get(_norm("Part No"))
@@ -1483,6 +1591,9 @@ def write_autofill_to_new_file(
         set_by_header("Drilling Cost", ev("drilling_cost"))
         set_by_header("Milling Time In Min", ev("milling_minutes"))
         set_by_header("Milling Cost", ev("milling_cost"))
+        set_by_header("Special Process Cost", ev("special_process_cost"))
+        set_by_header("Others", ev("others_cost"))
+        set_by_header("Inspection and testing Cost", ev("inspection_cost"))
         set_by_header("Sub Total", ev("subtotal"))
         set_by_header("P&F", ev("pf_cost"))
         set_by_header("OH & Profit", ev("oh_profit"))

@@ -99,12 +99,12 @@ export function SceneLights({
     return (
       <>
         {/* Base ambient */}
-        <ambientLight intensity={0.25} />
+        <ambientLight intensity={0.32} />
 
         {/* Key */}
         <directionalLight
           position={[7, 10, 7]}
-          intensity={1.65}
+          intensity={2.15}
           castShadow={enableShadows}
           shadow-mapSize-width={shadowMapSize}
           shadow-mapSize-height={shadowMapSize}
@@ -116,13 +116,16 @@ export function SceneLights({
         />
 
         {/* Fill */}
-        <directionalLight position={[-6, 7, -4]} intensity={0.55} />
+        <directionalLight position={[-6, 7, -4]} intensity={0.8} color="#b8d4f0" />
 
         {/* Rim */}
-        <directionalLight position={[0, 4, -10]} intensity={0.35} />
+        <directionalLight position={[0, 4, -10]} intensity={0.62} color="#dbe8f6" />
 
         {/* Subtle top highlight */}
-        <pointLight position={[0, 12, 0]} intensity={0.25} />
+        <pointLight position={[0, 12, 0]} intensity={0.42} color="#f7fbff" />
+
+        {/* Front sparkle */}
+        <pointLight position={[4, 2, 8]} intensity={0.24} color="#ffffff" />
       </>
     );
   }, [viewMode, enableShadows, quality]);

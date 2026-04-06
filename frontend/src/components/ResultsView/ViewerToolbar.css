@@ -4,10 +4,10 @@
   gap: 1rem;
   flex-wrap: wrap;
   padding: 0.75rem;
-  background-color: #2a2a2a;
+  background: rgba(8, 12, 18, 0.97);
   border-radius: 6px;
   margin-bottom: 1rem;
-  border: 1px solid #3a3a3a;
+  border: 1px solid #1f2937;
 }
 
 .toolbar-section {
@@ -18,7 +18,7 @@
 }
 
 .toolbar-label {
-  color: #ccc;
+  color: #c7d2de;
   font-size: 0.9rem;
   font-weight: 500;
   margin-right: 0.25rem;
@@ -27,23 +27,23 @@
 .toolbar-separator {
   width: 1px;
   height: 24px;
-  background-color: #555;
+  background-color: #243244;
   margin: 0 0.25rem;
 }
 
 .view-mode-selector {
   display: flex;
   gap: 0.25rem;
-  background-color: #1a1a1a;
+  background-color: #0f1720;
   border-radius: 6px;
   padding: 2px;
-  border: 1px solid #333;
+  border: 1px solid #243244;
 }
 
 .mode-button {
   padding: 0.4rem 0.8rem;
   background-color: transparent;
-  color: #ccc;
+  color: #9fb3c8;
   border: none;
   border-radius: 5px;
   cursor: pointer;
@@ -53,20 +53,26 @@
 }
 
 .mode-button:hover {
-  background-color: #3a3a3a;
+  background-color: #162231;
   color: #fff;
 }
 
 .mode-button.active {
-  background-color: #646cff;
+  background-color: #1f6feb;
   color: white;
+}
+
+.mode-button.active.accent-gold {
+  background: rgba(255, 215, 0, 0.18);
+  border: 1px solid #ffd700;
+  color: #ffd700;
 }
 
 .control-toggle {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #ccc;
+  color: #c7d2de;
   font-size: 0.9rem;
   cursor: pointer;
   user-select: none;
@@ -80,23 +86,23 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #ccc;
+  color: #c7d2de;
   font-size: 0.9rem;
 }
 
 .control-threshold input[type="number"] {
   width: 80px;
   padding: 0.25rem 0.5rem;
-  background-color: #1a1a1a;
+  background-color: #0f1720;
   color: #fff;
-  border: 1px solid #555;
+  border: 1px solid #334155;
   border-radius: 6px;
   font-size: 0.9rem;
 }
 
 .reset-button {
   padding: 0.5rem 1rem;
-  background-color: #646cff;
+  background-color: #1f6feb;
   color: white;
   border: none;
   border-radius: 6px;
@@ -107,12 +113,12 @@
 }
 
 .reset-button:hover {
-  background-color: #535bf2;
+  background-color: #3b82f6;
 }
 
 .download-glb-btn {
   padding: 0.5rem 1rem;
-  background-color: #42a5f5;
+  background-color: #0ea5e9;
   color: white;
   border: none;
   border-radius: 6px;
@@ -125,7 +131,7 @@
 }
 
 .download-glb-btn:hover {
-  background-color: #1e88e5;
+  background-color: #0284c7;
 }
 
 

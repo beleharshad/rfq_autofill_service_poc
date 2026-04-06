@@ -229,6 +229,7 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
   }
 
   const isAutoMode = summary.inference_metadata?.mode === 'auto_detect';
+  const isStepBacked = (summary.inference_metadata?.source || '').startsWith('uploaded_step');
   // Warnings may come from the summary or be empty
   const warnings: string[] = (summary as any).warnings || [];
 
@@ -322,7 +323,7 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
             </button>
           ) : (
             <>
-              {inferredStackExists && occAvailable === true ? (
+              {!isStepBacked && inferredStackExists && occAvailable === true ? (
                 <button
                   type="button"
                   className="download-link step-download"
@@ -338,6 +339,19 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
                 >
                   {generatingStepFromStack ? 'Generating STEP...' : 'Generate model.step'}
                 </button>
+              ) : isStepBacked ? (
+                <div
+                  className="download-link disabled"
+                  title="STEP-uploaded jobs use the uploaded STEP file as the 3D source of truth."
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <span>✓</span>
+                  <span>STEP-backed 3D source</span>
+                </div>
               ) : (
                 <div
                   className="download-link disabled"
@@ -364,7 +378,9 @@ function ResultsView({ jobId, job, onSwitchMode }: ResultsViewProps) {
 
         {!hasStepFile && stepFromStackStatus !== 'OK' && (
           <p className="download-hint" style={{ marginTop: '1rem', whiteSpace: 'pre-line' }}>
-            {inferredStackExists && occAvailable === true
+            {isStepBacked
+              ? '💡 STEP-uploaded jobs use the uploaded STEP file directly for 3D preview and downloads.'
+              : inferredStackExists && occAvailable === true
               ? '💡 You can generate a STEP directly from the inferred stack (button above).'
               : !inferredStackExists
                 ? '💡 Run Auto Convert → Infer Stack first (this creates outputs/inferred_stack.json).'

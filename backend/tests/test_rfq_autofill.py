@@ -524,6 +524,63 @@ def test_feature_time_confidence_capped_when_scale_estimated():
     assert "SCALE_ESTIMATED" in resp.reasons
 
 
+def test_calculate_drilling_time_applies_setup_once_for_counted_pattern():
+    svc = RFQAutofillService()
+
+    minutes = svc._calculate_drilling_time(
+        {
+            "holes": [
+                {"diameter": 0.25, "depth": 0.5, "kind": "axial", "count": 4},
+            ]
+        },
+        rm_len=1.0,
+    )
+
+    expected = ((0.5 + ((0.5 / 3.0) * 1.3)) * 4.0) + 1.0
+    assert minutes == pytest.approx(expected, rel=1e-6)
+
+
+def test_internal_bores_fallback_produces_drilling_estimate_without_detailed_features():
+    svc = RFQAutofillService()
+    resp = svc.autofill(
+        part_no="MIXER-001",
+        part_summary_dict={
+            "units": {"length": "in"},
+            "z_range": [0.0, 6.1],
+            "segments": [
+                {"z_start": 0.0, "z_end": 6.1, "od_diameter": 6.811, "id_diameter": 0.0, "confidence": 0.95},
+                {"z_start": 0.10, "z_end": 0.40, "od_diameter": 0.0, "id_diameter": 0.118, "confidence": 0.95},
+                {"z_start": 0.45, "z_end": 0.75, "od_diameter": 0.0, "id_diameter": 0.118, "confidence": 0.95},
+                {"z_start": 1.20, "z_end": 1.80, "od_diameter": 0.0, "id_diameter": 0.590, "confidence": 0.95},
+            ],
+            "feature_counts": {"internal_bores": 17},
+            "scale_report": {"method": "anchor_dimension", "validation_passed": True},
+            "inference_metadata": {"overall_confidence": 0.95},
+            "totals": {"total_length_in": 6.1, "max_od_in": 6.811, "max_id_in": 0.59},
+        },
+        tolerances={"rm_od_allowance_in": 0.1, "rm_len_allowance_in": 0.35},
+        step_metrics=None,
+        mode="ENVELOPE",
+        cost_inputs={
+            "rm_rate_per_kg": 90.0,
+            "turning_rate_per_min": 7.5,
+            "vmc_rate_per_min": 7.5,
+            "roughing_cost": 0.0,
+            "inspection_cost": 10.0,
+            "special_process_cost": 0.0,
+            "others_cost": 0.0,
+            "material_density_kg_m3": 7850.0,
+        },
+        vendor_quote_mode=True,
+    )
+
+    assert resp.estimate is not None
+    assert resp.estimate.drilling_minutes is not None
+    assert (resp.estimate.drilling_minutes.value or 0.0) > 0.0
+    assert resp.estimate.drilling_cost is not None
+    assert "INTERNAL_BORE_TIME_PROXY" in resp.reasons
+
+
 def test_vendor_quote_mode_preserves_solid_weight_and_feature_time_reason():
     svc = RFQAutofillService()
     resp = svc.autofill(

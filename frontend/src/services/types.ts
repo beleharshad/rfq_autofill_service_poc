@@ -138,6 +138,70 @@ export interface PartSummary {
     mode?: 'reference_only' | 'auto_detect';
     overall_confidence?: number;
     source?: string;
+    selected_body_index?: number;
+    body_count?: number;
+  };
+  selected_body?: {
+    body_index: number;
+    score: number;
+    extraction_method: string;
+    segment_count: number;
+    selection_reasons: string[];
+    dimensions: {
+      od_in: number | null;
+      id_in: number | null;
+      max_id_in: number | null;
+      length_in: number | null;
+    };
+    z_range?: [number, number];
+    totals?: {
+      volume_in3?: number;
+      max_od_in?: number;
+      max_id_in?: number;
+      total_length_in?: number;
+    };
+    feature_counts?: {
+      external_cylinders?: number;
+      internal_bores?: number;
+      planar_faces?: number;
+      total_faces?: number;
+    };
+  };
+  body_candidates?: Array<{
+    body_index: number;
+    score: number;
+    extraction_method: string;
+    segment_count: number;
+    selection_reasons: string[];
+    dimensions: {
+      od_in: number | null;
+      id_in: number | null;
+      max_id_in: number | null;
+      length_in: number | null;
+    };
+    z_range?: [number, number];
+    totals?: {
+      volume_in3?: number;
+      max_od_in?: number;
+      max_id_in?: number;
+      total_length_in?: number;
+    };
+    feature_counts?: {
+      external_cylinders?: number;
+      internal_bores?: number;
+      planar_faces?: number;
+      total_faces?: number;
+    };
+    inference_metadata?: {
+      source?: string;
+      overall_confidence?: number;
+    };
+  }>;
+  warnings?: string[];
+  step_metadata?: {
+    file_name?: string;
+    representation_context?: string;
+    body_count?: number;
   };
   features?: {
     holes: Array<{

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, API_BASE_URL } from '../../services/api';
 import type { FileInfo, RFQAutofillRequest, CorrectionsMap } from '../../services/types';
 import LatheViewer from './LatheViewer';
+import ThreeJSViewer from '../ResultsView/ThreeJSViewer';
 import { setSegments, type Segment as SegmentStoreType } from '../../state/segmentStore';
 import './AutoConvertResults.css';
 
@@ -471,7 +472,7 @@ function AutoConvertResults({
         rejection_pct: 0.02,
         exchange_rate: 82,
         currency: 'USD',
-        use_live_rate: false,
+        use_live_rate: true,
         qty_moq: 1,
         annual_potential_qty: 0,
         drawing_number: partNo,
@@ -589,6 +590,7 @@ function AutoConvertResults({
   const recommendation = llmAnalysis?.validation?.recommendation;
   const overallConf    = llmAnalysis?.validation?.overall_confidence;
   const crossChecks: string[] = llmAnalysis?.validation?.cross_checks || [];
+  const isStepBacked = ((partSummary as any)?.inference_metadata?.source || '').startsWith('uploaded_step');
 
   // Build lathe segments from overrides or raw segments.
   // When coming from raw segments, propagate the LLM bore (id_in) so the 3-D profile
@@ -881,24 +883,30 @@ function AutoConvertResults({
             </div>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-            <label style={{ fontSize: 13, color: '#8b949e' }}>
-              <input type="checkbox" checked={mergeSegments} onChange={(e) => setMergeSegments(e.target.checked)} />
-              <span style={{ marginLeft: 8 }}>Clean short segments (merge)</span>
-            </label>
-            <div style={{ flex: 1 }} />
-          </div>
+          {!isStepBacked && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <label style={{ fontSize: 13, color: '#8b949e' }}>
+                <input type="checkbox" checked={mergeSegments} onChange={(e) => setMergeSegments(e.target.checked)} />
+                <span style={{ marginLeft: 8 }}>Clean short segments (merge)</span>
+              </label>
+              <div style={{ flex: 1 }} />
+            </div>
+          )}
 
           <div className="acr-viewer-wrap">
-            <LatheViewer
-              segments={mergeSegments ? cleanedSegs : latheSegsNorm}
-              jobId={jobId}
-              boreDiameter={ed.id_in}
-              features={llmFeatures}
-              finishOd={ed.od_in}
-              maxOd={ed.max_od_in}
-              lengthIn={ed.length_in}
-            />
+            {isStepBacked && partSummary ? (
+              <ThreeJSViewer summary={partSummary} jobId={jobId} />
+            ) : (
+              <LatheViewer
+                segments={mergeSegments ? cleanedSegs : latheSegsNorm}
+                jobId={jobId}
+                boreDiameter={ed.id_in}
+                features={llmFeatures}
+                finishOd={ed.od_in}
+                maxOd={ed.max_od_in}
+                lengthIn={ed.length_in}
+              />
+            )}
           </div>
         </div>
       </div>

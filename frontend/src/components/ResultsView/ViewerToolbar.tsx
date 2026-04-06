@@ -20,9 +20,12 @@ interface ViewerToolbarProps {
   showShoulderPlanes: boolean;
   onShowShoulderPlanesChange: (show: boolean) => void;
   hasGlb: boolean;
+  forceGlbOnly?: boolean;
   glbUrl: string | null;
   units: string;
   onResetView: () => void;
+  showDims?: boolean;
+  onShowDimsChange?: (show: boolean) => void;
 }
 
 export function ViewerToolbar({
@@ -43,9 +46,12 @@ export function ViewerToolbar({
   showShoulderPlanes,
   onShowShoulderPlanesChange,
   hasGlb,
+  forceGlbOnly = false,
   glbUrl,
   units,
   onResetView,
+  showDims = true,
+  onShowDimsChange,
 }: ViewerToolbarProps) {
   return (
     <div className="viewer-toolbar">
@@ -79,8 +85,8 @@ export function ViewerToolbar({
 
       <div className="toolbar-separator" />
 
-      {/* Procedural Model Controls (only when no GLB) */}
-      {!hasGlb && (
+      {/* Procedural Model Controls (only when the viewer is not STEP/GLB-first) */}
+      {!hasGlb && !forceGlbOnly && (
         <>
           <div className="toolbar-section">
             <label className="control-toggle">
@@ -156,6 +162,15 @@ export function ViewerToolbar({
 
       {/* Actions */}
       <div className="toolbar-section">
+        {onShowDimsChange && (
+          <button
+            className={`mode-button ${showDims ? 'active accent-gold' : ''}`}
+            onClick={() => onShowDimsChange(!showDims)}
+            title="Toggle dimensions overlay"
+          >
+            Dims
+          </button>
+        )}
         {hasGlb && glbUrl && (
           <a
             href={glbUrl}

@@ -182,6 +182,29 @@ export const api = {
   },
 
   /**
+   * Fetch the 3D preview GLB through the preview endpoint and return a blob URL.
+   * Useful for STEP-backed jobs where the backend may need to generate the GLB
+   * directly from an uploaded STEP file before the viewer can load it.
+   */
+  async fetch3dPreviewBlobUrl(jobId: string, force = false): Promise<string> {
+    const response = await _fetch(this.get3dPreviewUrl(jobId, force));
+    if (!response.ok) {
+      let detail = `Failed to fetch 3D preview: ${response.status}`;
+      try {
+        const payload = await response.json();
+        const reason = payload?.detail?.reason || payload?.reason || payload?.detail;
+        if (reason) detail = String(reason);
+      } catch {
+        // ignore JSON parsing failures and keep the generic message
+      }
+      throw new Error(detail);
+    }
+    const blob = await response.blob();
+    if (!blob || blob.size === 0) throw new Error('Received empty 3D preview');
+    return URL.createObjectURL(blob);
+  },
+
+  /**
    * Fetch a job file with the X-API-Key header and return the raw Response.
    * Use this in components that need to call fetch() themselves (e.g. to parse
    * JSON) — it ensures the header is always included regardless of which
