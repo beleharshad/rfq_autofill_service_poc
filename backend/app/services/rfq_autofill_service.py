@@ -2118,12 +2118,13 @@ class RFQAutofillService:
                     subtotal_conf = _clamp01(min(weight_conf, time_conf, base_est_conf))
 
                 # Create feature-based estimate fields
-                drilling_minutes_field = None
-                drilling_cost_field = None
-                milling_minutes_field = None
-                milling_cost_field = None
-                vmc_minutes_field = None
-                vmc_cost_field = None
+                zero_feature_conf = _clamp01(min(feature_time_conf, base_est_conf))
+                drilling_minutes_field = _fv(0.0, zero_feature_conf, "rule.no_drilling_features")
+                drilling_cost_field = _fv(0.0, zero_feature_conf, "rule.no_drilling_features")
+                milling_minutes_field = _fv(0.0, zero_feature_conf, "rule.no_milling_features")
+                milling_cost_field = _fv(0.0, zero_feature_conf, "rule.no_milling_features")
+                vmc_minutes_field = _fv(0.0, zero_feature_conf, "rule.no_vmc_features")
+                vmc_cost_field = _fv(0.0, zero_feature_conf, "rule.no_vmc_features")
                 drilling_time_source = "feature_counts.internal_bores_time" if used_feature_count_proxy else "features.holes_time"
                 drilling_cost_source = "feature_counts.time_x_rate" if used_feature_count_proxy else "features.time_x_rate"
 
