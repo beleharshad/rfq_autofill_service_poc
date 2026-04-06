@@ -1575,25 +1575,26 @@ function ThreeJSViewer({
     return [0, 0, dims.midZ];
   }, [cameraPreset, dims.minZ, dims.midZ]);
   const cameraPosition = useMemo<[number, number, number]>(() => {
-    // All non-id presets look primarily from the SIDE (±X direction, perpendicular to the
-    // Z turning-axis). This ensures disc/flange parts are not shown end-on by default.
+    // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
+    // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
+    // Any large Z offset turns the view end-on (circle face) especially for disc shapes.
     switch (cameraPreset) {
       case 'od':
         // Pure side profile — orthogonal to turning axis
-        return [-cameraDistance, cameraDistance * 0.05, dims.midZ];
+        return [-cameraDistance, 0, dims.midZ];
       case 'section':
         // Elevated side view — see both OD height and ID depth
-        return [-cameraDistance * 0.68, cameraDistance * 0.70, dims.midZ + cameraDistance * 0.12];
+        return [-cameraDistance * 0.55, cameraDistance * 0.70, dims.midZ];
       case 'id':
         // Intentionally end-on: look straight down the bore
         return [cameraDistance * 0.02, cameraDistance * 0.02, dims.minZ - cameraDistance];
       case 'xray':
-        // 3/4 side view with slight depth for xray
-        return [-cameraDistance * 0.78, cameraDistance * 0.35, dims.midZ + cameraDistance * 0.22];
+        // 3/4 side view — slightly elevated side, no Z offset
+        return [-cameraDistance * 0.9, cameraDistance * 0.28, dims.midZ];
       case 'full':
       default:
-        // 3/4 view: mostly from +X side, slight elevation, small +Z for depth
-        return [-cameraDistance * 0.78, cameraDistance * 0.35, dims.midZ + cameraDistance * 0.22];
+        // 3/4 view from the side: mostly -X, slight elevation, camera Z exactly at midZ
+        return [-cameraDistance * 0.9, cameraDistance * 0.28, dims.midZ];
     }
   }, [cameraPreset, cameraDistance, dims.midZ, dims.minZ]);
 
