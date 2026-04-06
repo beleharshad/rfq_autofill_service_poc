@@ -743,12 +743,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
                 });
               } else {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color(VIEWER_METAL_DARK), 0.72),
-                  metalness: 0.78,
-                  roughness: 0.22,
-                  clearcoat: 0.45,
-                  clearcoatRoughness: 0.12,
-                  envMapIntensity: 1.1,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#c9d4df'), 0.82),
+                  metalness: 0.38,
+                  roughness: 0.52,
+                  clearcoat: 0.18,
+                  clearcoatRoughness: 0.24,
+                  envMapIntensity: 0.7,
+                  emissive: new THREE.Color('#2a3440'),
+                  emissiveIntensity: 0.08,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -793,12 +795,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
             });
           } else {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: VIEWER_METAL_DARK,
-              metalness: 0.78,
-              roughness: 0.22,
-              clearcoat: 0.45,
-              clearcoatRoughness: 0.12,
-              envMapIntensity: 1.1,
+              color: new THREE.Color('#c9d4df'),
+              metalness: 0.38,
+              roughness: 0.52,
+              clearcoat: 0.18,
+              clearcoatRoughness: 0.24,
+              envMapIntensity: 0.7,
+              emissive: new THREE.Color('#2a3440'),
+              emissiveIntensity: 0.08,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
@@ -1574,7 +1578,6 @@ function ThreeJSViewer({
 }: ThreeJSViewerProps) {
   const dims = useMemo(() => getViewerDimensions(summary), [summary]);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('full');
-  const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : 'realistic';
   const [cameraVersion, setCameraVersion] = useState(1);
   
   const [showOD] = useState(true);
@@ -1587,6 +1590,7 @@ function ThreeJSViewer({
   const [glbError, setGlbError] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
   const [hoveredHudDim, setHoveredHudDim] = useState<string | null>(null);
+  const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : (glbUrl ? 'standard' : 'realistic');
   
   // Overlay toggles
   const [showODOverlay] = useState(false);
