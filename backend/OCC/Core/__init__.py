@@ -40,20 +40,12 @@ class _OcpAliasFinder(importlib.abc.MetaPathFinder):
         if not fullname.startswith(f"{_PREFIX}."):
             return None
 
-        target_name = f"{_TARGET_PREFIX}.{fullname[len(_PREFIX) + 1:]}"
-        target_spec = importlib.util.find_spec(target_name)
-        if target_spec is None:
-            return None
-
-        alias_spec = importlib.util.spec_from_loader(
+        return importlib.util.spec_from_loader(
             fullname,
             _OcpAliasLoader(fullname),
-            origin=target_spec.origin,
-            is_package=target_spec.submodule_search_locations is not None,
+            origin=f"{_TARGET_PREFIX}.{fullname[len(_PREFIX) + 1:]}",
+            is_package=False,
         )
-        if alias_spec and target_spec.submodule_search_locations is not None:
-            alias_spec.submodule_search_locations = list(target_spec.submodule_search_locations)
-        return alias_spec
 
 
 if not any(isinstance(finder, _OcpAliasFinder) for finder in sys.meta_path):
