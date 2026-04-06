@@ -366,6 +366,13 @@ function AutoConvertResults({
     throw new Error('Timed out waiting for PDF pages to render (outputs/pdf_pages/).');
   };
 
+  const detectInputKinds = async () => {
+    const files = cachedFilesRef.current ?? await api.getJobFiles(jobId);
+    const hasPdf = files.files.some((f) => f.name.toLowerCase().endsWith('.pdf'));
+    const hasStep = files.files.some((f) => /\.(step|stp)$/i.test(f.name) || /(^inputs\/.*\.(step|stp)$)|(^(outputs\/model\.step)$)/i.test(f.path));
+    return { hasPdf, hasStep };
+  };
+
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleAutoDetect = async () => {
@@ -373,6 +380,20 @@ function AutoConvertResults({
     setDetecting(true);
     setDetectionError(null);
     try {
+      const { hasPdf, hasStep } = await detectInputKinds();
+
+      if (!hasPdf && hasStep) {
+        const analysis = await api.llmAnalyzeJob(jobId).catch((err: unknown) => {
+          throw new Error(`STEP analysis failed: ${err instanceof Error ? err.message : 'network error'}`);
+        });
+        setLlmAnalysis(analysis);
+        if (!rfqPartNo.trim() && analysis?.extracted?.part_number) {
+          setRfqPartNo(analysis.extracted.part_number);
+        }
+        await loadResults();
+        return;
+      }
+
       await ensurePdfPagesReady();
 
       await api.detectViews(jobId).catch((err: unknown) => {
