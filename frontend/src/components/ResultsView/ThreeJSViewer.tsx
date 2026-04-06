@@ -244,66 +244,64 @@ function GlbFitCamera({
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
-    // Determine the turning axis by comparing the GLB bbox against the
-    // extracted part dimensions. "Longest axis" is not reliable because some
-    // parts are wider than they are long, so the OD can be larger than length.
-    const expectedLength = Math.max(dims.length ?? 0, 0.001);
-    const expectedOd = Math.max(dims.maxOd ?? (dims.maxRadius * 2), 0.001);
-    const axisCandidates = [
-      { axis: 'x' as const, length: size.x, crossA: size.y, crossB: size.z },
-      { axis: 'y' as const, length: size.y, crossA: size.x, crossB: size.z },
-      { axis: 'z' as const, length: size.z, crossA: size.x, crossB: size.y },
-    ];
+    const axes = [
+      { axis: 'x' as const, size: size.x, min: box.min.x, max: box.max.x },
+      { axis: 'y' as const, size: size.y, min: box.min.y, max: box.max.y },
+      { axis: 'z' as const, size: size.z, min: box.min.z, max: box.max.z },
+    ].sort((a, b) => b.size - a.size);
 
-    const bestAxis = axisCandidates
-      .map((candidate) => {
-        const crossMax = Math.max(candidate.crossA, candidate.crossB);
-        const crossMin = Math.min(candidate.crossA, candidate.crossB);
-        const lengthScore = Math.abs(candidate.length - expectedLength) / expectedLength;
-        const odScore = Math.abs(crossMax - expectedOd) / expectedOd;
-        const roundScore = Math.abs(candidate.crossA - candidate.crossB) / Math.max(crossMax, 0.001);
-        // Prefer an axis whose other two spans are similar (round cross-section).
-        const score = lengthScore * 1.4 + odScore + roundScore * 0.8 + (crossMin / Math.max(crossMax, 0.001) < 0.55 ? 0.6 : 0);
-        return { ...candidate, crossMax, score };
-      })
-      .sort((a, b) => a.score - b.score)[0];
+    const longestAxis = axes[0].axis;
+    const shortestAxis = axes[2].axis;
 
-    const turningAxis = bestAxis.axis;
-    const axisLength = bestAxis.length;
-    const maxCross = bestAxis.crossMax;
+    // For arbitrary STEP solids, the most complete presentation is usually
+    // looking along the SHORTEST axis so the two largest extents fill the view.
+    // Keep longest-axis viewing only for the explicit ID preset.
+    const viewAxis = preset === 'id' ? longestAxis : shortestAxis;
+    const visibleAxes = (['x', 'y', 'z'] as const).filter((axis) => axis !== viewAxis);
+    const visibleSizeA = size[visibleAxes[0]];
+    const visibleSizeB = size[visibleAxes[1]];
+    const depthSize = size[viewAxis];
 
     const fovRad = 18 * Math.PI / 180;
-    const halfLen = axisLength / 2;
-    const halfCross = maxCross / 2;
-    const sceneSphere = Math.sqrt(halfLen ** 2 + (halfCross * 1.9) ** 2 + halfCross ** 2);
+    const halfA = visibleSizeA / 2;
+    const halfB = visibleSizeB / 2;
+    const halfDepth = depthSize / 2;
+    const sceneSphere = Math.sqrt(halfA ** 2 + (halfB * 1.05) ** 2 + halfDepth ** 2);
     const dist = (sceneSphere / Math.tan(fovRad)) * 1.12;
 
-    let camPos: THREE.Vector3;
-    const elev = (preset === 'section') ? 0.72 : (preset === 'od') ? 0.0 : 0.28;
-    const side = (preset === 'od') ? 1.0 : 0.9;
+    const axisVector = (axis: 'x' | 'y' | 'z', amount: number) =>
+      axis === 'x'
+        ? new THREE.Vector3(amount, 0, 0)
+        : axis === 'y'
+        ? new THREE.Vector3(0, amount, 0)
+        : new THREE.Vector3(0, 0, amount);
 
+    let camPos = center.clone();
     if (preset === 'id') {
-      // End-on: look along the inferred turning axis from the near end
-      if (turningAxis === 'x') {
-        camPos = new THREE.Vector3(box.min.x - dist, center.y, center.z);
-      } else if (turningAxis === 'y') {
-        camPos = new THREE.Vector3(center.x, box.min.y - dist, center.z);
-      } else {
-        camPos = new THREE.Vector3(center.x, center.y, box.min.z - dist);
-      }
+      camPos.add(axisVector(viewAxis, dist));
+    } else if (preset === 'od') {
+      camPos.add(axisVector(viewAxis, dist));
+    } else if (preset === 'section') {
+      camPos
+        .add(axisVector(viewAxis, dist * 0.94))
+        .add(axisVector(visibleAxes[0], dist * 0.26))
+        .add(axisVector(visibleAxes[1], dist * 0.16));
+    } else if (preset === 'xray') {
+      camPos
+        .add(axisVector(viewAxis, dist * 0.92))
+        .add(axisVector(visibleAxes[0], dist * 0.22))
+        .add(axisVector(visibleAxes[1], dist * 0.10));
     } else {
-      // Side-profile: camera is PERPENDICULAR to the inferred turning axis
-      if (turningAxis === 'x') {
-        // X is the turning axis → look from ±Z side
-        camPos = new THREE.Vector3(center.x, center.y + dist * elev, center.z - dist * side);
-      } else if (turningAxis === 'y') {
-        // Y is the turning axis → look from ±X/Z side
-        camPos = new THREE.Vector3(center.x - dist * side, center.y, center.z - dist * elev);
-      } else {
-        // Z is the turning axis → look from ±X side
-        camPos = new THREE.Vector3(center.x - dist * side, center.y + dist * elev, center.z);
-      }
+      // Full: face-on to shortest axis with a mild 3/4 lift.
+      camPos
+        .add(axisVector(viewAxis, dist * 0.96))
+        .add(axisVector(visibleAxes[0], dist * 0.18))
+        .add(axisVector(visibleAxes[1], dist * 0.12));
     }
+
+    // Keep camera roll stable by choosing an up vector from one visible axis.
+    const upAxis = visibleAxes.includes('y') ? 'y' : visibleAxes[0];
+    camera.up.copy(axisVector(upAxis, 1));
 
     camera.position.copy(camPos);
     camera.lookAt(center);
