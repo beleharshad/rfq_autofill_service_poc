@@ -2077,7 +2077,7 @@ function ThreeJSViewer({
 
   useEffect(() => {
     setCanvasReady(false);
-  }, [jobId, glbUrl]);
+  }, [jobId]);
 
   useEffect(() => {
     if (!glbUrl) return;
