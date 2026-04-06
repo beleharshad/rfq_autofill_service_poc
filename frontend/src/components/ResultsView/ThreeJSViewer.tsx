@@ -1563,7 +1563,6 @@ function ThreeJSViewer({
   const [highlightThinWall] = useState(false);
   const [thinWallThreshold] = useState(0.1); // Default 0.1 units
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
-  const [hasGlb, setHasGlb] = useState(false);
   const [glbLoading, setGlbLoading] = useState(false);
   const [glbError, setGlbError] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
@@ -1582,6 +1581,10 @@ function ThreeJSViewer({
   const controlsRef = useRef<any>(null);
   const glbObjectUrlRef = useRef<string | null>(null);
   const isStepBacked = (summary.inference_metadata?.source || '').startsWith('uploaded_step');
+  const preferProceduralStep = isStepBacked && (summary.segments?.length ?? 0) > 1;
+  const activeGlbUrl = preferProceduralStep ? null : glbUrl;
+  const showGlbBadge = Boolean(activeGlbUrl);
+  const showStepBadge = isStepBacked && !showGlbBadge;
 
   // Handle mouse move for tooltip positioning
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1599,6 +1602,13 @@ function ThreeJSViewer({
 
   // Load GLB preview.
   useEffect(() => {
+    if (preferProceduralStep) {
+      setGlbLoading(false);
+      setGlbError(null);
+      setGlbUrl(null);
+      return;
+    }
+
     let cancelled = false;
 
     const revokeBlobUrl = () => {
@@ -1623,11 +1633,9 @@ function ThreeJSViewer({
           URL.revokeObjectURL(blobUrl);
           return;
         }
-        setHasGlb(true);
         assignBlobUrl(blobUrl);
       } catch (err) {
         if (!cancelled) {
-          setHasGlb(false);
           assignBlobUrl(null);
           setGlbError(err instanceof Error ? err.message : 'Failed to load STEP-based 3D preview');
         }
@@ -1641,7 +1649,6 @@ function ThreeJSViewer({
         const files = await api.getJobFiles(jobId);
         const glbFile = files.files.find((f) => f.name === 'model.glb');
         if (glbFile) {
-          setHasGlb(true);
           setGlbError(null);
           try {
             const blobUrl = await api.fetchBlobUrl(jobId, 'outputs/model.glb');
@@ -1678,7 +1685,7 @@ function ThreeJSViewer({
       clearInterval(interval);
       revokeBlobUrl();
     };
-  }, [jobId, isStepBacked]);
+  }, [jobId, isStepBacked, preferProceduralStep]);
 
   const handleResetView = useCallback(() => {
     setCameraVersion((version) => version + 1);
@@ -1700,7 +1707,7 @@ function ThreeJSViewer({
   // For GLB mode GlbFitCamera sets the real orbit target imperatively.
   // Use a stable [0,0,0] here so OrbitControls never overrides it on re-render.
   const glbOrigin = useMemo<[number, number, number]>(() => [0, 0, 0], []);
-  const orbitTarget = glbUrl ? glbOrigin : focusTarget;
+  const orbitTarget = activeGlbUrl ? glbOrigin : focusTarget;
   const cameraPosition = useMemo<[number, number, number]>(() => {
     // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
     // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
@@ -1735,8 +1742,8 @@ function ThreeJSViewer({
     <div className={`threejs-viewer${isStepBacked ? ' acr-viewer-wrap threejs-viewer--step' : ''}`}>
       <div className="viewer-header">
         <h3>
-          3D View {hasGlb && <span className="glb-badge">(GLB)</span>}
-          {isStepBacked && !hasGlb && <span className="glb-badge">(STEP)</span>}
+          3D View {showGlbBadge && <span className="glb-badge">(GLB)</span>}
+          {showStepBadge && <span className="glb-badge">(STEP)</span>}
         </h3>
       </div>
       <div 
@@ -1767,7 +1774,7 @@ function ThreeJSViewer({
             near={0.01}
             far={cameraDistance * 20}
           />
-          {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
+          {!activeGlbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
           {/* For GLB mode, GlbFitCamera sets the real orbit target after load.
               Pass [0,0,0] so OrbitControls doesn't fight GlbFitCamera with the
               part_summary-based focusTarget (which is in part_summary coord space). */}
@@ -1776,8 +1783,8 @@ function ThreeJSViewer({
             enablePan
             enableDamping
             dampingFactor={0.06}
-            minDistance={glbUrl ? 0.01 : maxRadius * 0.5}
-            maxDistance={glbUrl ? 10000 : cameraDistance * 8}
+            minDistance={activeGlbUrl ? 0.01 : maxRadius * 0.5}
+            maxDistance={activeGlbUrl ? 10000 : cameraDistance * 8}
             target={orbitTarget}
           />
           <Scene
@@ -1786,7 +1793,7 @@ function ThreeJSViewer({
             showID={showID}
             highlightThinWall={highlightThinWall}
             thinWallThreshold={thinWallThreshold}
-            glbUrl={glbUrl}
+            glbUrl={activeGlbUrl}
             showODOverlay={showODOverlay}
             showIDOverlay={showIDOverlay}
             showShoulderPlanes={showShoulderPlanes}
@@ -1798,18 +1805,18 @@ function ThreeJSViewer({
             showSlots={showSlots}
             showChamfers={showChamfers}
             showFillets={showFillets}
-            forceGlbOnly={isStepBacked}
+            forceGlbOnly={isStepBacked && !preferProceduralStep}
             cameraPreset={cameraPreset}
             cameraVersion={cameraVersion}
           />
           {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
-          {!glbUrl && <DimOverlays dims={dims} visible={showDims} />}
-          {!glbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
+          {!activeGlbUrl && <DimOverlays dims={dims} visible={showDims} />}
+          {!activeGlbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
           <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
             <GizmoViewcube />
           </GizmoHelper>
         </Canvas>
-        {isStepBacked && !glbUrl && (
+        {isStepBacked && !preferProceduralStep && !activeGlbUrl && (
           <div className="viewer-loading-overlay" style={{
             position: 'absolute',
             inset: 0,
