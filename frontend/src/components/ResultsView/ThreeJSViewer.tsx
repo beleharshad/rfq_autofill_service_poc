@@ -750,7 +750,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
                   specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
                   transparent: false,
                   opacity: 1.0,
-                  side: THREE.FrontSide,
+                  side: THREE.DoubleSide,
                 });
               } else if (viewMode === 'xray') {
                 newMaterial = new THREE.MeshStandardMaterial({
@@ -771,7 +771,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
                   envMapIntensity: 1.1,
                   transparent: false,
                   opacity: 1.0,
-                  side: THREE.FrontSide,
+                  side: THREE.DoubleSide,
                 });
               }
               
@@ -800,7 +800,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
               transparent: false,
               opacity: 1.0,
-              side: THREE.FrontSide,
+              side: THREE.DoubleSide,
             });
           } else if (viewMode === 'xray') {
             child.material = new THREE.MeshStandardMaterial({
@@ -821,7 +821,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               envMapIntensity: 1.1,
               transparent: false,
               opacity: 1.0,
-              side: THREE.FrontSide,
+              side: THREE.DoubleSide,
             });
           }
         }
