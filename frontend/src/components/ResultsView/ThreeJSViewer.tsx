@@ -1680,6 +1680,10 @@ function ThreeJSViewer({
     if (cameraPreset === 'id') return [0, 0, dims.minZ];
     return [0, 0, dims.midZ];
   }, [cameraPreset, dims.minZ, dims.midZ]);
+  // For GLB mode GlbFitCamera sets the real orbit target imperatively.
+  // Use a stable [0,0,0] here so OrbitControls never overrides it on re-render.
+  const glbOrigin = useMemo<[number, number, number]>(() => [0, 0, 0], []);
+  const orbitTarget = glbUrl ? glbOrigin : focusTarget;
   const cameraPosition = useMemo<[number, number, number]>(() => {
     // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
     // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
@@ -1747,14 +1751,17 @@ function ThreeJSViewer({
             far={cameraDistance * 20}
           />
           {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
+          {/* For GLB mode, GlbFitCamera sets the real orbit target after load.
+              Pass [0,0,0] so OrbitControls doesn't fight GlbFitCamera with the
+              part_summary-based focusTarget (which is in part_summary coord space). */}
           <OrbitControls
             ref={controlsRef}
             enablePan
             enableDamping
             dampingFactor={0.06}
-            minDistance={maxRadius * 0.5}
-            maxDistance={cameraDistance * 8}
-            target={focusTarget}
+            minDistance={glbUrl ? 0.01 : maxRadius * 0.5}
+            maxDistance={glbUrl ? 10000 : cameraDistance * 8}
+            target={orbitTarget}
           />
           <Scene
             summary={summary}
@@ -1778,8 +1785,9 @@ function ThreeJSViewer({
             cameraPreset={cameraPreset}
             cameraVersion={cameraVersion}
           />
-          <DimOverlays dims={dims} visible={showDims} />
-          <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />
+          {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
+          {!glbUrl && <DimOverlays dims={dims} visible={showDims} />}
+          {!glbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
           <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
             <GizmoViewcube />
           </GizmoHelper>
