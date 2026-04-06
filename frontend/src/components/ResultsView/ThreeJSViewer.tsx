@@ -719,15 +719,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               let newMaterial: THREE.Material;
               if (viewMode === 'realistic') {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color(VIEWER_METAL), 0.78),
-                  metalness: 0.88,
-                  roughness: 0.14,
-                  clearcoat: 0.8,
-                  clearcoatRoughness: 0.08,
-                  reflectivity: 0.9,
-                  envMapIntensity: 1.4,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#d4dde6'), 0.84),
+                  metalness: 0.92,
+                  roughness: 0.12,
+                  clearcoat: 0.86,
+                  clearcoatRoughness: 0.07,
+                  reflectivity: 0.96,
+                  envMapIntensity: 1.7,
                   specularIntensity: 1,
                   specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
+                  emissive: new THREE.Color('#1a222c'),
+                  emissiveIntensity: 0.04,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -771,15 +773,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
           // No material, create a default material based on view mode
           if (viewMode === 'realistic') {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: VIEWER_METAL,
-              metalness: 0.88,
-              roughness: 0.14,
-              clearcoat: 0.8,
-              clearcoatRoughness: 0.08,
-              reflectivity: 0.9,
-              envMapIntensity: 1.4,
+              color: new THREE.Color('#d4dde6'),
+              metalness: 0.92,
+              roughness: 0.12,
+              clearcoat: 0.86,
+              clearcoatRoughness: 0.07,
+              reflectivity: 0.96,
+              envMapIntensity: 1.7,
               specularIntensity: 1,
               specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
+              emissive: new THREE.Color('#1a222c'),
+              emissiveIntensity: 0.04,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
@@ -1590,7 +1594,7 @@ function ThreeJSViewer({
   const [glbError, setGlbError] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
   const [hoveredHudDim, setHoveredHudDim] = useState<string | null>(null);
-  const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : (glbUrl ? 'standard' : 'realistic');
+  const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : 'realistic';
   
   // Overlay toggles
   const [showODOverlay] = useState(false);
