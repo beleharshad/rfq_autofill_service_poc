@@ -207,6 +207,102 @@ function SegmentMesh({
 interface GlbModelProps {
   url: string;
   viewMode: ViewMode;
+  cameraPreset: CameraPreset;
+  cameraVersion: number;
+}
+
+/**
+ * After the GLB scene is in the render tree, compute its real axis-aligned
+ * bounding box and reposition the camera so the longest axis (the turning
+ * axis) lies horizontally across the view.  This is robust to any world-space
+ * orientation the STEP exporter chose for the part.
+ */
+function GlbFitCamera({
+  scene,
+  preset,
+  version,
+}: {
+  scene: THREE.Object3D;
+  preset: CameraPreset;
+  version: number;
+}) {
+  const { camera, controls } = useThree();
+  // Re-run whenever version changes (user clicked a preset button or reset)
+  const fittedKey = useRef<string>('');
+
+  useEffect(() => {
+    const key = `${scene.uuid}-${preset}-${version}`;
+    if (fittedKey.current === key) return;
+    fittedKey.current = key;
+
+    const box = new THREE.Box3().setFromObject(scene);
+    if (box.isEmpty()) return;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+
+    // Determine which world axis is the turning / longest axis
+    const longest = Math.max(size.x, size.y, size.z);
+    const isXLongest = size.x >= size.y && size.x >= size.z;
+    const isYLongest = !isXLongest && size.y >= size.z;
+    // isZLongest is the fallthrough
+
+    const maxCross = isXLongest
+      ? Math.max(size.y, size.z)
+      : isYLongest
+      ? Math.max(size.x, size.z)
+      : Math.max(size.x, size.y);
+
+    const fovRad = 18 * Math.PI / 180;
+    const halfLen = longest / 2;
+    const halfCross = maxCross / 2;
+    const sceneSphere = Math.sqrt(halfLen ** 2 + (halfCross * 1.9) ** 2 + halfCross ** 2);
+    const dist = (sceneSphere / Math.tan(fovRad)) * 1.12;
+
+    let camPos: THREE.Vector3;
+    const elev = (preset === 'section') ? 0.72 : (preset === 'od') ? 0.0 : 0.28;
+    const side = (preset === 'od') ? 1.0 : 0.9;
+
+    if (preset === 'id') {
+      // End-on: look along the longest (turning) axis from the near end
+      if (isXLongest) {
+        camPos = new THREE.Vector3(box.min.x - dist, center.y, center.z);
+      } else if (isYLongest) {
+        camPos = new THREE.Vector3(center.x, box.min.y - dist, center.z);
+      } else {
+        camPos = new THREE.Vector3(center.x, center.y, box.min.z - dist);
+      }
+    } else {
+      // Side-profile: camera is PERPENDICULAR to the longest (turning) axis
+      if (isXLongest) {
+        // X is the turning axis → look from ±Z side
+        camPos = new THREE.Vector3(center.x, center.y + dist * elev, center.z - dist * side);
+      } else if (isYLongest) {
+        // Y is the turning axis → look from ±X/Z side
+        camPos = new THREE.Vector3(center.x - dist * side, center.y, center.z - dist * elev);
+      } else {
+        // Z is the turning axis → look from ±X side
+        camPos = new THREE.Vector3(center.x - dist * side, center.y + dist * elev, center.z);
+      }
+    }
+
+    camera.position.copy(camPos);
+    camera.lookAt(center);
+    camera.near = Math.max(dist * 0.001, 0.001);
+    camera.far = dist * 20;
+    camera.updateProjectionMatrix();
+
+    if (controls) {
+      const orbit = controls as any;
+      orbit.target.copy(center);
+      const wasEnabled = orbit.enableDamping;
+      orbit.enableDamping = false;
+      orbit.update();
+      orbit.enableDamping = wasEnabled;
+    }
+  }, [scene, preset, version, camera, controls]);
+
+  return null;
 }
 
 interface ViewerDimensions {
@@ -555,7 +651,7 @@ function SceneCameraDriver({ position, target, version }: SceneCameraDriverProps
   return null;
 }
 
-function GlbModel({ url, viewMode }: GlbModelProps) {
+function GlbModel({ url, viewMode, cameraPreset, cameraVersion }: GlbModelProps) {
   const gltf = useLoader(GLTFLoader, url);
   
   // Traverse the scene and update materials based on view mode
@@ -678,7 +774,10 @@ function GlbModel({ url, viewMode }: GlbModelProps) {
   }, [gltf, viewMode]);
   
   return (
-    <primitive object={gltf.scene} />
+    <>
+      <primitive object={gltf.scene} />
+      <GlbFitCamera scene={gltf.scene} preset={cameraPreset} version={cameraVersion} />
+    </>
   );
 }
 
@@ -1127,6 +1226,8 @@ function Scene({
   showChamfers = false,
   showFillets = false,
   forceGlbOnly = false,
+  cameraPreset = 'full',
+  cameraVersion = 0,
 }: {
   summary: PartSummary;
   showOD: boolean;
@@ -1146,6 +1247,8 @@ function Scene({
   showChamfers?: boolean;
   showFillets?: boolean;
   forceGlbOnly?: boolean;
+  cameraPreset?: CameraPreset;
+  cameraVersion?: number;
 }) {
   // Enable hover detection
   useHoverDetection(jobId, onHoverChange);
@@ -1195,7 +1298,7 @@ function Scene({
       {/* Render GLB model if available, otherwise procedural */}
       {glbUrl ? (
         <Suspense fallback={null}>
-          <GlbModel url={glbUrl} viewMode={viewMode} />
+          <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} />
         </Suspense>
       ) : !forceGlbOnly ? (
         summary.segments.map((segment, index) => (
@@ -1640,7 +1743,7 @@ function ThreeJSViewer({
             near={0.01}
             far={cameraDistance * 20}
           />
-          <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />
+          {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
           <OrbitControls
             ref={controlsRef}
             enablePan
@@ -1669,6 +1772,8 @@ function ThreeJSViewer({
             showChamfers={showChamfers}
             showFillets={showFillets}
             forceGlbOnly={isStepBacked}
+            cameraPreset={cameraPreset}
+            cameraVersion={cameraVersion}
           />
           <DimOverlays dims={dims} visible={showDims} />
           <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />
