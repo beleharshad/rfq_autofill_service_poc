@@ -31,12 +31,12 @@ export function SceneLights({
     const size = quality === 'high' ? 512 : 256;
     const data = new Uint8Array(4 * size * size);
 
-    const backdropTop = new THREE.Color('#3b4652');
-    const backdropMid = new THREE.Color('#1f2731');
-    const backdropBottom = new THREE.Color('#0f141a');
-    const fillColor = new THREE.Color('#cfd8e3');
-    const coolSoftbox = new THREE.Color('#f4f8ff');
-    const warmSoftbox = new THREE.Color('#fff1d9');
+    const backdropTop = new THREE.Color('#4a4d52');
+    const backdropMid = new THREE.Color('#2d3035');
+    const backdropBottom = new THREE.Color('#15171a');
+    const fillColor = new THREE.Color('#d9d9d6');
+    const coolSoftbox = new THREE.Color('#f2f2f0');
+    const warmSoftbox = new THREE.Color('#fffaf2');
 
     const gaussian = (value: number, center: number, width: number) => {
       const delta = (value - center) / width;
@@ -64,7 +64,7 @@ export function SceneLights({
         c.add(warmSoftbox.clone().multiplyScalar(rightPanel * 2.35));
         c.add(fillColor.clone().multiplyScalar(topStrip * 1.35));
         c.add(fillColor.clone().multiplyScalar(frontFill * 0.85));
-        c.add(new THREE.Color('#8fa6bd').multiplyScalar(horizonGlow * 0.5));
+        c.add(new THREE.Color('#a7a9ac').multiplyScalar(horizonGlow * 0.45));
 
         c.r = Math.min(c.r, 1);
         c.g = Math.min(c.g, 1);
@@ -130,7 +130,7 @@ export function SceneLights({
     return (
       <>
         {/* Base ambient */}
-        <ambientLight intensity={0.42} color="#e6eef8" />
+        <ambientLight intensity={0.48} color="#f0f0ed" />
 
         {/* Key */}
         <directionalLight
@@ -148,19 +148,19 @@ export function SceneLights({
         />
 
         {/* Fill */}
-        <directionalLight position={[-8, 6, -3]} intensity={1.55} color="#e4eefc" />
+        <directionalLight position={[-8, 6, -3]} intensity={1.7} color="#f1f1ef" />
 
         {/* Rim */}
-        <directionalLight position={[2, 5, -12]} intensity={1.15} color="#f9fbff" />
+        <directionalLight position={[2, 5, -12]} intensity={1.2} color="#f7f7f5" />
 
         {/* Subtle top highlight */}
-        <pointLight position={[0, 12, 2]} intensity={0.92} color="#f7fbff" />
+        <pointLight position={[0, 12, 2]} intensity={1.0} color="#fbfbf8" />
 
         {/* Front sparkle */}
         <pointLight position={[3.5, 2.5, 9]} intensity={0.95} color="#ffffff" />
 
         {/* Opposite sparkle for edge rolloff */}
-        <pointLight position={[-5, 1.5, 7]} intensity={0.46} color="#dce9ff" />
+        <pointLight position={[-5, 1.5, 7]} intensity={0.5} color="#ecece8" />
       </>
     );
   }, [viewMode, enableShadows, quality]);
