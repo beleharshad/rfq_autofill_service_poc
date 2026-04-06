@@ -1621,20 +1621,6 @@ function ThreeJSViewer({
   const controlsRef = useRef<any>(null);
   const glbObjectUrlRef = useRef<string | null>(null);
   const isStepBacked = (summary.inference_metadata?.source || '').startsWith('uploaded_step');
-  const hasSegmentProfile = useMemo(() => {
-    if ((summary.segments?.length ?? 0) < 2) return false;
-    let idChanges = 0;
-    let odChanges = 0;
-    for (let i = 1; i < summary.segments.length; i++) {
-      const prev = summary.segments[i - 1];
-      const curr = summary.segments[i];
-      if (Math.abs((curr.id_diameter ?? 0) - (prev.id_diameter ?? 0)) > 0.01) idChanges += 1;
-      if (Math.abs((curr.od_diameter ?? 0) - (prev.od_diameter ?? 0)) > 0.01) odChanges += 1;
-    }
-    return idChanges > 0 || odChanges > 0;
-  }, [summary.segments]);
-  const preferProceduralForStep = isStepBacked && hasSegmentProfile;
-  const activeGlbUrl = preferProceduralForStep ? null : glbUrl;
 
   // Handle mouse move for tooltip positioning
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1666,17 +1652,6 @@ function ThreeJSViewer({
       glbObjectUrlRef.current = url;
       setGlbUrl(url);
     };
-
-    if (preferProceduralForStep) {
-      setHasGlb(false);
-      setGlbLoading(false);
-      setGlbError(null);
-      assignBlobUrl(null);
-      return () => {
-        cancelled = true;
-        revokeBlobUrl();
-      };
-    }
 
     const loadStepBackedGlb = async () => {
       setGlbLoading(true);
@@ -1742,7 +1717,7 @@ function ThreeJSViewer({
       clearInterval(interval);
       revokeBlobUrl();
     };
-  }, [jobId, isStepBacked, preferProceduralForStep]);
+  }, [jobId, isStepBacked]);
 
   const handleResetView = useCallback(() => {
     setCameraVersion((version) => version + 1);
@@ -1764,7 +1739,7 @@ function ThreeJSViewer({
   // For GLB mode GlbFitCamera sets the real orbit target imperatively.
   // Use a stable [0,0,0] here so OrbitControls never overrides it on re-render.
   const glbOrigin = useMemo<[number, number, number]>(() => [0, 0, 0], []);
-  const orbitTarget = activeGlbUrl ? glbOrigin : focusTarget;
+  const orbitTarget = glbUrl ? glbOrigin : focusTarget;
   const cameraPosition = useMemo<[number, number, number]>(() => {
     // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
     // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
@@ -1799,9 +1774,8 @@ function ThreeJSViewer({
     <div className={`threejs-viewer${isStepBacked ? ' acr-viewer-wrap threejs-viewer--step' : ''}`}>
       <div className="viewer-header">
         <h3>
-          3D View {activeGlbUrl && <span className="glb-badge">(GLB)</span>}
-          {preferProceduralForStep && <span className="glb-badge">(SEGMENTS)</span>}
-          {isStepBacked && !activeGlbUrl && !preferProceduralForStep && <span className="glb-badge">(STEP)</span>}
+          3D View {glbUrl && <span className="glb-badge">(GLB)</span>}
+          {isStepBacked && !glbUrl && <span className="glb-badge">(STEP)</span>}
         </h3>
       </div>
       <div 
@@ -1832,7 +1806,7 @@ function ThreeJSViewer({
             near={0.01}
             far={cameraDistance * 20}
           />
-          {!activeGlbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
+          {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
           {/* For GLB mode, GlbFitCamera sets the real orbit target after load.
               Pass [0,0,0] so OrbitControls doesn't fight GlbFitCamera with the
               part_summary-based focusTarget (which is in part_summary coord space). */}
@@ -1841,8 +1815,8 @@ function ThreeJSViewer({
             enablePan
             enableDamping
             dampingFactor={0.06}
-            minDistance={activeGlbUrl ? 0.01 : maxRadius * 0.5}
-            maxDistance={activeGlbUrl ? 10000 : cameraDistance * 8}
+            minDistance={glbUrl ? 0.01 : maxRadius * 0.5}
+            maxDistance={glbUrl ? 10000 : cameraDistance * 8}
             target={orbitTarget}
           />
           <Scene
@@ -1851,7 +1825,7 @@ function ThreeJSViewer({
             showID={showID}
             highlightThinWall={highlightThinWall}
             thinWallThreshold={thinWallThreshold}
-            glbUrl={activeGlbUrl}
+            glbUrl={glbUrl}
             showODOverlay={showODOverlay}
             showIDOverlay={showIDOverlay}
             showShoulderPlanes={showShoulderPlanes}
@@ -1863,18 +1837,18 @@ function ThreeJSViewer({
             showSlots={showSlots}
             showChamfers={showChamfers}
             showFillets={showFillets}
-            forceGlbOnly={isStepBacked && !preferProceduralForStep}
+            forceGlbOnly={isStepBacked}
             cameraPreset={cameraPreset}
             cameraVersion={cameraVersion}
           />
           {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
-          {!activeGlbUrl && <DimOverlays dims={dims} visible={showDims} />}
-          {!activeGlbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
+          {!glbUrl && <DimOverlays dims={dims} visible={showDims} />}
+          {!glbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
           <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
             <GizmoViewcube />
           </GizmoHelper>
         </Canvas>
-        {isStepBacked && !activeGlbUrl && !preferProceduralForStep && (
+        {isStepBacked && !glbUrl && (
           <div className="viewer-loading-overlay" style={{
             position: 'absolute',
             inset: 0,
