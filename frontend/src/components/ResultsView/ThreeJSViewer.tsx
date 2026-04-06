@@ -63,6 +63,20 @@ function ViewerOrbitControls({ controlsRef, isGlb, focusTarget, maxRadius, camer
   );
 }
 
+function ViewerGizmo() {
+  const { camera } = useThree();
+
+  if (!camera || !(camera instanceof THREE.Camera) || !(camera as THREE.Camera & { position?: THREE.Vector3 }).position) {
+    return null;
+  }
+
+  return (
+    <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
+      <GizmoViewcube />
+    </GizmoHelper>
+  );
+}
+
 interface SegmentMeshProps {
   segment: PartSummary['segments'][0];
   index: number;
@@ -1901,6 +1915,7 @@ function ThreeJSViewer({
   const [glbError, setGlbError] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
   const [hoveredHudDim, setHoveredHudDim] = useState<string | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
   const renderViewMode: ViewMode = cameraPreset === 'xray' ? 'xray' : 'realistic';
   
   // Overlay toggles
@@ -2061,6 +2076,10 @@ function ThreeJSViewer({
   }, [jobId]);
 
   useEffect(() => {
+    setCanvasReady(false);
+  }, [jobId, glbUrl]);
+
+  useEffect(() => {
     if (!glbUrl) return;
 
     const timers = [0, 120, 300, 700].map((delay) =>
@@ -2100,6 +2119,7 @@ function ThreeJSViewer({
             gl.toneMappingExposure = 1.1;
             gl.outputColorSpace = THREE.SRGBColorSpace;
             gl.localClippingEnabled = true;
+            window.requestAnimationFrame(() => setCanvasReady(true));
           }}
           shadows={renderViewMode === 'realistic'}
           style={{ background: VIEWER_BG }}
@@ -2113,14 +2133,16 @@ function ThreeJSViewer({
             near={0.01}
             far={cameraDistance * 20}
           />
-          {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
-          <ViewerOrbitControls
-            controlsRef={controlsRef}
-            isGlb={Boolean(glbUrl)}
-            focusTarget={focusTarget}
-            maxRadius={maxRadius}
-            cameraDistance={cameraDistance}
-          />
+          {canvasReady && !glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
+          {canvasReady && (
+            <ViewerOrbitControls
+              controlsRef={controlsRef}
+              isGlb={Boolean(glbUrl)}
+              focusTarget={focusTarget}
+              maxRadius={maxRadius}
+              cameraDistance={cameraDistance}
+            />
+          )}
           <Scene
             summary={summary}
             showOD={showOD}
@@ -2147,9 +2169,7 @@ function ThreeJSViewer({
           {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
           {!glbUrl && <DimOverlays dims={dims} visible={showDims} />}
           {!glbUrl && <DimFocusHighlight activeDim={hoveredHudDim} dims={dims} />}
-          <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
-            <GizmoViewcube />
-          </GizmoHelper>
+          {canvasReady && <ViewerGizmo />}
         </Canvas>
         {isStepBacked && !glbUrl && (
           <div className="viewer-loading-overlay" style={{
