@@ -1575,18 +1575,25 @@ function ThreeJSViewer({
     return [0, 0, dims.midZ];
   }, [cameraPreset, dims.minZ, dims.midZ]);
   const cameraPosition = useMemo<[number, number, number]>(() => {
+    // All non-id presets look primarily from the SIDE (±X direction, perpendicular to the
+    // Z turning-axis). This ensures disc/flange parts are not shown end-on by default.
     switch (cameraPreset) {
-      case 'section':
-        return [-cameraDistance * 0.12, cameraDistance * 0.68, dims.midZ + cameraDistance * 0.72];
       case 'od':
-        return [-cameraDistance * 0.08, cameraDistance * 0.26, dims.midZ + cameraDistance * 0.96];
+        // Pure side profile — orthogonal to turning axis
+        return [-cameraDistance, cameraDistance * 0.05, dims.midZ];
+      case 'section':
+        // Elevated side view — see both OD height and ID depth
+        return [-cameraDistance * 0.68, cameraDistance * 0.70, dims.midZ + cameraDistance * 0.12];
       case 'id':
+        // Intentionally end-on: look straight down the bore
         return [cameraDistance * 0.02, cameraDistance * 0.02, dims.minZ - cameraDistance];
       case 'xray':
-        return [-cameraDistance * 0.18, cameraDistance * 0.5, dims.midZ + cameraDistance * 0.85];
+        // 3/4 side view with slight depth for xray
+        return [-cameraDistance * 0.78, cameraDistance * 0.35, dims.midZ + cameraDistance * 0.22];
       case 'full':
       default:
-        return [-cameraDistance * 0.5, cameraDistance * 0.42, dims.midZ + cameraDistance * 0.75];
+        // 3/4 view: mostly from +X side, slight elevation, small +Z for depth
+        return [-cameraDistance * 0.78, cameraDistance * 0.35, dims.midZ + cameraDistance * 0.22];
     }
   }, [cameraPreset, cameraDistance, dims.midZ, dims.minZ]);
 
