@@ -2380,7 +2380,18 @@ class RFQAutofillService:
             if span >= 0.05:
                 bore_spans.append(span)
 
-        representative_diameter = min(positive_ids) if positive_ids else (_as_float(finish_id_in) or 0.125)
+        min_proxy_diameter_in = 0.04
+        meaningful_ids = [diameter for diameter in positive_ids if diameter >= min_proxy_diameter_in]
+        meaningful_ids.sort()
+        if meaningful_ids:
+            representative_diameter = meaningful_ids[len(meaningful_ids) // 2]
+        else:
+            representative_diameter = max(
+                _as_float(finish_id_in) or 0.0,
+                max(positive_ids) if positive_ids else 0.0,
+                0.125,
+            )
+
         bore_spans.sort()
         if bore_spans:
             representative_depth = bore_spans[len(bore_spans) // 2]
