@@ -11,6 +11,7 @@ function NewJobPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [sourceUrl, setSourceUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [loadingSample, setLoadingSample] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +43,25 @@ function NewJobPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
-    if (files.length === 0) {
-      setError('Please select at least one PDF, ZIP, STEP, or STP file.');
+
+    const trimmedUrl = sourceUrl.trim();
+    if (files.length === 0 && !trimmedUrl) {
+      setError('Please select at least one PDF, ZIP, STEP, or STP file, or paste a supported file URL.');
       return;
+    }
+
+    if (trimmedUrl) {
+      try {
+        const parsed = new URL(trimmedUrl);
+        const lower = parsed.pathname.toLowerCase();
+        if (!['.pdf', '.zip', '.step', '.stp'].some((ext) => lower.endsWith(ext))) {
+          setError('URL must point to a PDF, ZIP, STEP, or STP file.');
+          return;
+        }
+      } catch {
+        setError('Please enter a valid http:// or https:// URL.');
+        return;
+      }
     }
 
     setUploading(true);
@@ -56,7 +72,8 @@ function NewJobPage() {
         files,
         name || undefined,
         description || undefined,
-        mode
+        mode,
+        trimmedUrl || undefined,
       );
       
       navigate(`/jobs/${job.job_id}`);
@@ -146,6 +163,21 @@ function NewJobPage() {
               </ul>
             </div>
           )}
+          <p className="upload-divider">or paste a direct file URL</p>
+          <input
+            type="url"
+            id="job-source-url"
+            name="source_url"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            placeholder="https://example.com/part.step"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <p className="mode-description">
+            Direct links ending in .pdf, .zip, .step, or .stp are supported.
+          </p>
         </div>
         <div className="form-group">
           <label htmlFor="job-name">Job Name (Optional)</label>

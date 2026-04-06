@@ -85,7 +85,8 @@ export const api = {
     files: File[],
     name?: string,
     description?: string,
-    mode?: string
+    mode?: string,
+    sourceUrl?: string,
   ): Promise<JobResponse> {
     const formData = new FormData();
     
@@ -103,6 +104,10 @@ export const api = {
     
     if (mode) {
       formData.append('mode', mode);
+    }
+
+    if (sourceUrl && sourceUrl.trim()) {
+      formData.append('source_url', sourceUrl.trim());
     }
 
     const response = await fetch(`${API_BASE_URL}/jobs`, {

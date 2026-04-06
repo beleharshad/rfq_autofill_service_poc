@@ -1,8 +1,10 @@
 """Job management endpoints."""
 
 import json
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
+from urllib.parse import urlparse, unquote
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 
@@ -55,11 +57,27 @@ def _validate_upload(file: UploadFile) -> None:
         )
 
 
+def _validate_source_url(source_url: str) -> None:
+    """Raise 400 if *source_url* is not a supported remote file URL."""
+    parsed = urlparse((source_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Source URL must be a valid http:// or https:// URL.")
+
+    filename = Path(unquote(parsed.path or "")).name
+    ext = Path(filename).suffix.lower()
+    if ext not in _ALLOWED_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail="Source URL must point to a PDF, ZIP, STEP, or STP file.",
+        )
+
+
 @router.post("", response_model=JobResponse, status_code=201)
 async def create_job(
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     mode: Optional[str] = Form(None),
+    source_url: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
 ):
     """Create a new job and upload files.
@@ -81,11 +99,17 @@ async def create_job(
         if description:
             description = description[:1000].strip()
 
-        if _auto_convert_requires_source_file(mode) and not files:
+        if source_url:
+            source_url = source_url.strip()
+
+        if _auto_convert_requires_source_file(mode) and not files and not source_url:
             raise HTTPException(
                 status_code=400,
                 detail="Auto Convert jobs require at least one PDF, ZIP, STEP, or STP file.",
             )
+
+        if source_url:
+            _validate_source_url(source_url)
 
         # Validate each uploaded file before creating the job
         for f in (files or []):
@@ -103,6 +127,15 @@ async def create_job(
                 )
         else:
             job = job_service.get_job(job_id)
+
+        if source_url:
+            job = job_service.upload_remote_file(job_id, source_url)
+            if _auto_convert_requires_source_file(mode) and not job.input_files:
+                job_service.delete_job(job_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Remote URL upload did not produce any accepted source files.",
+                )
 
         return job
 

@@ -915,13 +915,43 @@ class StepAnalysisService:
 		code_issues = self._build_code_issues(extracted)
 		assembly_like = body_count > 1 or "ASSEMBLY" in representation_context.upper() or candidate_count > 1
 		selected_score = float(selected_body.get("score") or 0.0)
+		selected_method = str(selected_body.get("extraction_method") or "")
 		close_alternatives = False
 		body_candidates = part_summary.get("body_candidates") or []
+		score_gap = 999.0
 		if len(body_candidates) > 1:
 			sorted_scores = sorted((float(candidate.get("score") or 0.0) for candidate in body_candidates), reverse=True)
-			if len(sorted_scores) > 1 and (sorted_scores[0] - sorted_scores[1]) < 8.0:
+			if len(sorted_scores) > 1:
+				score_gap = sorted_scores[0] - sorted_scores[1]
+			if len(sorted_scores) > 1 and score_gap < 8.0:
 				close_alternatives = True
-		recommendation = "ACCEPT" if not assembly_like and not close_alternatives and not code_issues and od_in and length_in and selected_score >= 20.0 else "REVIEW"
+
+		strong_feature_selected = (
+			selected_method == "feature"
+			and selected_score >= 35.0
+			and od_in is not None
+			and length_in is not None
+			and score_gap >= 10.0
+		)
+		bbox_only = selected_method == "bbox"
+		accept_despite_multibody = strong_feature_selected and not close_alternatives and not bbox_only
+		recommendation = (
+			"ACCEPT"
+			if (
+				not code_issues
+				and od_in
+				and length_in
+				and (
+					(not assembly_like and not close_alternatives and selected_score >= 20.0)
+					or accept_despite_multibody
+				)
+			)
+			else "REVIEW"
+		)
+		if accept_despite_multibody:
+			cross_checks.append(
+				"Accepted despite multi-body STEP structure because one feature-extracted body was clearly dominant and internally consistent."
+			)
 
 		return {
 			"pdf_text_length": 0,

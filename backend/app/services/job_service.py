@@ -2,6 +2,10 @@
 
 import uuid
 import shutil
+from pathlib import Path
+from urllib.parse import urlparse, unquote
+
+import requests
 from typing import List, Optional
 from fastapi import UploadFile, HTTPException
 from app.models.job import JobResponse, JobStatus, JobMode
@@ -119,6 +123,77 @@ class JobService:
             self.job_storage.update_job_status(job_id, JobStatus.CREATED)
         
         return self.get_job(job_id)
+
+    def upload_remote_file(self, job_id: str, source_url: str, max_bytes: int = 50 * 1024 * 1024) -> JobResponse:
+        """Download a remote PDF/ZIP/STEP/STP file into job inputs."""
+        job = self.job_storage.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        parsed = urlparse(source_url.strip())
+        if parsed.scheme not in {"http", "https"}:
+            raise HTTPException(status_code=400, detail="Only http:// and https:// URLs are supported.")
+
+        filename = self._filename_from_url(source_url)
+
+        try:
+            response = requests.get(source_url, timeout=30, allow_redirects=True, stream=True)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to download source URL: {exc}")
+
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            try:
+                if int(content_length) > max_bytes:
+                    raise HTTPException(status_code=413, detail="Remote file exceeds the 50 MB upload limit.")
+            except ValueError:
+                pass
+
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=1024 * 256):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(status_code=413, detail="Remote file exceeds the 50 MB upload limit.")
+            chunks.append(chunk)
+
+        content = b"".join(chunks)
+        if not content:
+            raise HTTPException(status_code=400, detail="Downloaded remote file was empty.")
+
+        saved_path = self.file_storage.save_bytes_file(job_id, filename, content)
+
+        if saved_path.lower().endswith('.zip'):
+            zip_path = self.file_storage.get_job_path(job_id) / saved_path
+            extracted = self.file_storage.extract_zip(job_id, zip_path)
+            try:
+                zip_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            for rel_path in extracted:
+                if rel_path.lower().endswith(('.step', '.stp')):
+                    self.step_analysis_service.process_uploaded_step(
+                        job_id,
+                        self.file_storage.get_job_path(job_id) / rel_path,
+                    )
+        elif saved_path.lower().endswith(('.step', '.stp')):
+            self.step_analysis_service.process_uploaded_step(
+                job_id,
+                self.file_storage.get_job_path(job_id) / saved_path,
+            )
+
+        self.job_storage.update_job_status(job_id, JobStatus.CREATED)
+        return self.get_job(job_id)
+
+    def _filename_from_url(self, source_url: str) -> str:
+        parsed = urlparse(source_url)
+        filename = Path(unquote(parsed.path or '')).name
+        if filename:
+            return filename
+        return f"remote_upload_{uuid.uuid4().hex[:8]}.pdf"
     
     def get_job(self, job_id: str) -> JobResponse:
         """Get job with file lists.

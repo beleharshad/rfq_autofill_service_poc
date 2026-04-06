@@ -108,6 +108,14 @@
   color: #ccc;
 }
 
+.upload-divider {
+  margin: 1rem 0 0.5rem;
+  color: #9aa0aa;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .error-message {
   padding: 0.75rem;
   background-color: #4a1a1a;

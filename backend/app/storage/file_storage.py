@@ -65,6 +65,28 @@ class FileStorage:
 
         return f"inputs/{safe_filename}"
 
+    def save_bytes_file(self, job_id: str, filename: str, content: bytes) -> str:
+        """Save raw bytes as an input file for a job.
+
+        Returns:
+            Relative path to saved file
+        """
+        self.ensure_job_directories(job_id)
+        inputs_path = self.get_inputs_path(job_id)
+
+        safe_filename = self._sanitize_filename(filename)
+        file_path = inputs_path / safe_filename
+
+        counter = 1
+        base_name = file_path.stem
+        ext = file_path.suffix
+        while file_path.exists():
+            file_path = inputs_path / f"{base_name}_{counter}{ext}"
+            counter += 1
+
+        file_path.write_bytes(content)
+        return f"inputs/{file_path.name}"
+
     def extract_zip(self, job_id: str, zip_path: Path) -> List[str]:
         """Extract supported CAD/doc files from a ZIP archive.
 
