@@ -34,6 +34,35 @@ interface ThreeJSViewerProps {
   toolbarVariant?: ToolbarVariant;
 }
 
+interface ViewerOrbitControlsProps {
+  controlsRef: React.RefObject<any>;
+  isGlb: boolean;
+  focusTarget: [number, number, number];
+  maxRadius: number;
+  cameraDistance: number;
+}
+
+function ViewerOrbitControls({ controlsRef, isGlb, focusTarget, maxRadius, cameraDistance }: ViewerOrbitControlsProps) {
+  const { camera } = useThree();
+
+  if (!camera || !(camera instanceof THREE.Camera) || !(camera as THREE.Camera & { position?: THREE.Vector3 }).position) {
+    return null;
+  }
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      args={[camera]}
+      enablePan
+      enableDamping
+      dampingFactor={0.06}
+      minDistance={isGlb ? 0.01 : maxRadius * 0.5}
+      maxDistance={isGlb ? 10000 : cameraDistance * 8}
+      {...(!isGlb ? { target: focusTarget } : {})}
+    />
+  );
+}
+
 interface SegmentMeshProps {
   segment: PartSummary['segments'][0];
   index: number;
@@ -2085,26 +2114,13 @@ function ThreeJSViewer({
             far={cameraDistance * 20}
           />
           {!glbUrl && <SceneCameraDriver position={cameraPosition} target={focusTarget} version={cameraVersion} />}
-          {glbUrl ? (
-            <OrbitControls
-              ref={controlsRef}
-              enablePan
-              enableDamping
-              dampingFactor={0.06}
-              minDistance={0.01}
-              maxDistance={10000}
-            />
-          ) : (
-            <OrbitControls
-              ref={controlsRef}
-              enablePan
-              enableDamping
-              dampingFactor={0.06}
-              minDistance={maxRadius * 0.5}
-              maxDistance={cameraDistance * 8}
-              target={focusTarget}
-            />
-          )}
+          <ViewerOrbitControls
+            controlsRef={controlsRef}
+            isGlb={Boolean(glbUrl)}
+            focusTarget={focusTarget}
+            maxRadius={maxRadius}
+            cameraDistance={cameraDistance}
+          />
           <Scene
             summary={summary}
             showOD={showOD}
