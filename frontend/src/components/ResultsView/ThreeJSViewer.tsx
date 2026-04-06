@@ -599,20 +599,65 @@ function formatMetricDimension(value: number | null | undefined, units: string):
   return `${mmValue.toFixed(2)} mm`;
 }
 
+function formatCompactDimension(value: number | null | undefined, units: string, decimals = 3): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return units === 'in' ? `${value.toFixed(decimals)}"` : `${value.toFixed(decimals)} ${units}`;
+}
+
+function summarizeRange(values: number[], units: string, decimals = 3): string | null {
+  const finite = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!finite.length) return null;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  if (Math.abs(max - min) < 1e-6) return formatCompactDimension(min, units, decimals);
+  return `${formatCompactDimension(min, units, decimals)}–${formatCompactDimension(max, units, decimals)}`;
+}
+
 function buildFeatureList(summary: PartSummary): string[] {
   const features = summary.features;
+  const units = summary.units?.length || 'in';
   const lines: string[] = [];
 
-  if (features?.holes?.length) lines.push(`${features.holes.length}× holes`);
-  if (features?.slots?.length) lines.push(`${features.slots.length}× slots`);
-  if (features?.chamfers?.length) lines.push(`${features.chamfers.length}× chamfers`);
-  if (features?.fillets?.length) lines.push(`${features.fillets.length}× fillets`);
+  if (features?.holes?.length) {
+    const dia = summarizeRange(features.holes.map((hole) => hole.diameter), units, 4);
+    const depth = summarizeRange(features.holes.map((hole) => hole.depth ?? 0), units, 4);
+    lines.push(`Holes: ${features.holes.length}×${dia ? ` · Ø ${dia}` : ''}${depth ? ` · depth ${depth}` : ''}`);
+  }
+
+  if (features?.slots?.length) {
+    const width = summarizeRange(features.slots.map((slot) => slot.width), units, 4);
+    const length = summarizeRange(features.slots.map((slot) => slot.length), units, 4);
+    lines.push(`Slots: ${features.slots.length}×${width ? ` · W ${width}` : ''}${length ? ` · L ${length}` : ''}`);
+  }
+
+  if (features?.chamfers?.length) {
+    const size = summarizeRange(features.chamfers.map((chamfer) => chamfer.size), units, 4);
+    const angleValues = features.chamfers.map((chamfer) => chamfer.angle).filter((value) => Number.isFinite(value));
+    const angle = angleValues.length ? `${Math.min(...angleValues).toFixed(0)}°${Math.max(...angleValues) !== Math.min(...angleValues) ? `–${Math.max(...angleValues).toFixed(0)}°` : ''}` : null;
+    lines.push(`Chamfers: ${features.chamfers.length}×${size ? ` · ${size}` : ''}${angle ? ` · ${angle}` : ''}`);
+  }
+
+  if (features?.fillets?.length) {
+    const radius = summarizeRange(features.fillets.map((fillet) => fillet.radius), units, 4);
+    lines.push(`Fillets: ${features.fillets.length}×${radius ? ` · R ${radius}` : ''}`);
+  }
+
+  if (features?.threads?.length) {
+    const designation = features.threads.map((thread) => thread.designation).filter(Boolean).slice(0, 2).join(', ');
+    lines.push(`Threads: ${features.threads.length}×${designation ? ` · ${designation}` : ''}`);
+  }
 
   if (!lines.length && summary.feature_counts?.internal_bores) {
-    lines.push(`${summary.feature_counts.internal_bores}× internal bores`);
+    lines.push(`Internal bores: ${summary.feature_counts.internal_bores}×`);
   }
-  if (!lines.length && summary.feature_counts?.external_cylinders) {
-    lines.push(`${summary.feature_counts.external_cylinders}× external cylinders`);
+  if (summary.feature_counts?.external_cylinders) {
+    lines.push(`External cylinders: ${summary.feature_counts.external_cylinders}×`);
+  }
+  if (summary.feature_counts?.planar_faces) {
+    lines.push(`Planar faces: ${summary.feature_counts.planar_faces}`);
+  }
+  if (summary.feature_counts?.total_faces) {
+    lines.push(`Total faces: ${summary.feature_counts.total_faces}`);
   }
 
   return lines.slice(0, 4);
@@ -942,17 +987,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
               let newMaterial: THREE.Material;
               if (viewMode === 'realistic') {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color('#c3cfdb'), 0.88),
-                  metalness: 1,
-                  roughness: 0.07,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#edf3f9'), 0.94),
+                  metalness: 0.92,
+                  roughness: 0.13,
                   clearcoat: 1,
-                  clearcoatRoughness: 0.03,
+                  clearcoatRoughness: 0.08,
                   reflectivity: 1,
-                  envMapIntensity: 2.8,
+                  envMapIntensity: 3.6,
                   specularIntensity: 1,
                   specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-                  emissive: new THREE.Color('#0f151d'),
-                  emissiveIntensity: 0.015,
+                  emissive: new THREE.Color('#4a5c70'),
+                  emissiveIntensity: 0.08,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -970,14 +1015,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
                 });
               } else {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color('#c9d4df'), 0.82),
-                  metalness: 0.38,
-                  roughness: 0.52,
-                  clearcoat: 0.18,
-                  clearcoatRoughness: 0.24,
-                  envMapIntensity: 0.7,
-                  emissive: new THREE.Color('#2a3440'),
-                  emissiveIntensity: 0.08,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#dde6ef'), 0.86),
+                  metalness: 0.45,
+                  roughness: 0.44,
+                  clearcoat: 0.28,
+                  clearcoatRoughness: 0.18,
+                  envMapIntensity: 1.1,
+                  emissive: new THREE.Color('#405062'),
+                  emissiveIntensity: 0.12,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
@@ -999,17 +1044,17 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
           // No material, create a default material based on view mode
           if (viewMode === 'realistic') {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#c3cfdb'),
-              metalness: 1,
-              roughness: 0.07,
+              color: new THREE.Color('#edf3f9'),
+              metalness: 0.92,
+              roughness: 0.13,
               clearcoat: 1,
-              clearcoatRoughness: 0.03,
+              clearcoatRoughness: 0.08,
               reflectivity: 1,
-              envMapIntensity: 2.8,
+              envMapIntensity: 3.6,
               specularIntensity: 1,
               specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-              emissive: new THREE.Color('#0f151d'),
-              emissiveIntensity: 0.015,
+              emissive: new THREE.Color('#4a5c70'),
+              emissiveIntensity: 0.08,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
@@ -1027,14 +1072,14 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }
             });
           } else {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#c9d4df'),
-              metalness: 0.38,
-              roughness: 0.52,
-              clearcoat: 0.18,
-              clearcoatRoughness: 0.24,
-              envMapIntensity: 0.7,
-              emissive: new THREE.Color('#2a3440'),
-              emissiveIntensity: 0.08,
+              color: new THREE.Color('#dde6ef'),
+              metalness: 0.45,
+              roughness: 0.44,
+              clearcoat: 0.28,
+              clearcoatRoughness: 0.18,
+              envMapIntensity: 1.1,
+              emissive: new THREE.Color('#405062'),
+              emissiveIntensity: 0.12,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,

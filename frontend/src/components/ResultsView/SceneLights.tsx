@@ -130,12 +130,12 @@ export function SceneLights({
     return (
       <>
         {/* Base ambient */}
-        <ambientLight intensity={0.24} color="#d8e2ee" />
+        <ambientLight intensity={0.42} color="#e6eef8" />
 
         {/* Key */}
         <directionalLight
           position={[6, 8, 11]}
-          intensity={2.8}
+          intensity={3.35}
           color="#ffffff"
           castShadow={enableShadows}
           shadow-mapSize-width={shadowMapSize}
@@ -148,19 +148,19 @@ export function SceneLights({
         />
 
         {/* Fill */}
-        <directionalLight position={[-8, 6, -3]} intensity={1.15} color="#dbe8f8" />
+        <directionalLight position={[-8, 6, -3]} intensity={1.55} color="#e4eefc" />
 
         {/* Rim */}
-        <directionalLight position={[2, 5, -12]} intensity={0.95} color="#f7fbff" />
+        <directionalLight position={[2, 5, -12]} intensity={1.15} color="#f9fbff" />
 
         {/* Subtle top highlight */}
-        <pointLight position={[0, 12, 2]} intensity={0.68} color="#f7fbff" />
+        <pointLight position={[0, 12, 2]} intensity={0.92} color="#f7fbff" />
 
         {/* Front sparkle */}
-        <pointLight position={[3.5, 2.5, 9]} intensity={0.72} color="#ffffff" />
+        <pointLight position={[3.5, 2.5, 9]} intensity={0.95} color="#ffffff" />
 
         {/* Opposite sparkle for edge rolloff */}
-        <pointLight position={[-5, 1.5, 7]} intensity={0.32} color="#d5e5ff" />
+        <pointLight position={[-5, 1.5, 7]} intensity={0.46} color="#dce9ff" />
       </>
     );
   }, [viewMode, enableShadows, quality]);
