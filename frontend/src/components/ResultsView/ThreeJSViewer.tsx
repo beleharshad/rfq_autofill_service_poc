@@ -1716,6 +1716,7 @@ function ThreeJSViewer({
     if (cameraPreset === 'id') return [0, 0, dims.minZ];
     return [0, 0, dims.midZ];
   }, [cameraPreset, dims.minZ, dims.midZ]);
+  const glbCameraPreset: CameraPreset = glbUrl ? 'xray' : cameraPreset;
   const cameraPosition = useMemo<[number, number, number]>(() => {
     // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
     // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
@@ -1822,7 +1823,7 @@ function ThreeJSViewer({
             showChamfers={showChamfers}
             showFillets={showFillets}
             forceGlbOnly={isStepBacked}
-            cameraPreset={cameraPreset}
+            cameraPreset={glbCameraPreset}
             cameraVersion={cameraVersion}
           />
           {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
