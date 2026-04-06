@@ -130,41 +130,10 @@ async def get_3d_preview(job_id: str, force: bool = False, bore_diameter: float 
     glb_path  = out / "model.glb"
     step_uploaded = _is_step_uploaded_job(job_id)
 
-    # ── STEP-uploaded jobs: preview only the selected body in inch-scaled units ──
+    # ── STEP-uploaded jobs: preview the full uploaded model / assembly ──
     if step_uploaded and step_path.exists():
-        summary_path = out / "part_summary.json"
-        preview_step_path = out / "selected_body_preview.step"
-        preview_glb_path = out / "selected_body_preview.glb"
         render_step_path = step_path
-        render_glb_path = preview_glb_path if preview_glb_path.exists() else glb_path
-
-        preview_sources_mtime = step_path.stat().st_mtime
-        if summary_path.exists():
-            preview_sources_mtime = max(preview_sources_mtime, summary_path.stat().st_mtime)
-
-        try:
-            if force or not preview_step_path.exists() or preview_step_path.stat().st_mtime < preview_sources_mtime:
-                info = _step_analysis_service.export_selected_body_preview_step(
-                    job_id,
-                    source_step_path=step_path,
-                    output_step_path=preview_step_path,
-                )
-                logger.info(
-                    "[3d-preview] Built selected-body preview STEP for %s (body=%s scale=%s)",
-                    job_id,
-                    info.get("selected_body_index"),
-                    info.get("scale_applied"),
-                )
-            render_step_path = preview_step_path
-            render_glb_path = preview_glb_path
-        except Exception as exc:
-            logger.warning(
-                "[3d-preview] Falling back to original uploaded STEP for %s: %s",
-                job_id,
-                exc,
-            )
-            render_step_path = step_path
-            render_glb_path = glb_path
+        render_glb_path = glb_path
 
         if not force and render_glb_path.exists() and render_step_path.exists():
             step_mt = render_step_path.stat().st_mtime
@@ -177,7 +146,7 @@ async def get_3d_preview(job_id: str, force: bool = False, bore_diameter: float 
                     filename="model.glb",
                 )
 
-        logger.info(f"[3d-preview] Using uploaded STEP as preview source for {job_id}")
+            logger.info(f"[3d-preview] Using full uploaded STEP assembly as preview source for {job_id}")
         ok, err = _glb_converter.convert_step_to_glb(render_step_path, render_glb_path, check_cache=not force)
 
         if not ok:
