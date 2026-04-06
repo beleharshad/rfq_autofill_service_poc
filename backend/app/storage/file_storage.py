@@ -7,30 +7,41 @@ from pathlib import Path
 from typing import List, Tuple
 from fastapi import UploadFile, HTTPException
 
+from app.storage.paths import jobs_root, legacy_jobs_roots
+
 
 class FileStorage:
     """Handles file storage operations for jobs."""
 
-    def __init__(self, base_path: str = "data/jobs"):
+    def __init__(self, base_path: str | Path | None = None):
         """Initialize file storage.
 
         Args:
             base_path: Base path for job storage
         """
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path).resolve() if base_path is not None else jobs_root()
+        self.read_base_paths = [self.base_path, *legacy_jobs_roots()]
         self.base_path.mkdir(parents=True, exist_ok=True)
 
-    def get_job_path(self, job_id: str) -> Path:
+    def get_job_path(self, job_id: str, base_path: Path | None = None) -> Path:
         """Get the storage path for a job."""
-        return self.base_path / job_id
+        return (base_path or self.base_path) / job_id
 
-    def get_inputs_path(self, job_id: str) -> Path:
+    def _candidate_job_paths(self, job_id: str) -> List[Path]:
+        paths: List[Path] = []
+        for base_path in self.read_base_paths:
+            job_path = self.get_job_path(job_id, base_path)
+            if job_path not in paths:
+                paths.append(job_path)
+        return paths
+
+    def get_inputs_path(self, job_id: str, base_path: Path | None = None) -> Path:
         """Get the inputs directory path for a job."""
-        return self.get_job_path(job_id) / "inputs"
+        return self.get_job_path(job_id, base_path) / "inputs"
 
-    def get_outputs_path(self, job_id: str) -> Path:
+    def get_outputs_path(self, job_id: str, base_path: Path | None = None) -> Path:
         """Get the outputs directory path for a job."""
-        return self.get_job_path(job_id) / "outputs"
+        return self.get_job_path(job_id, base_path) / "outputs"
 
     def ensure_job_directories(self, job_id: str) -> None:
         """Ensure job directories exist."""
@@ -101,34 +112,34 @@ class FileStorage:
     # ✅ FIXED: recursive listing for inputs (recommended)
     def list_input_files(self, job_id: str) -> List[str]:
         """List all input files for a job (recursive)."""
-        inputs_path = self.get_inputs_path(job_id)
-        if not inputs_path.exists():
-            return []
-
         files: List[str] = []
-        job_path = self.get_job_path(job_id)
-
-        for file_path in inputs_path.rglob("*"):
-            if file_path.is_file():
-                rel = file_path.relative_to(job_path)
-                files.append(str(rel).replace("\\", "/"))
+        for job_path in self._candidate_job_paths(job_id):
+            inputs_path = job_path / "inputs"
+            if not inputs_path.exists():
+                continue
+            for file_path in inputs_path.rglob("*"):
+                if file_path.is_file():
+                    rel = file_path.relative_to(job_path)
+                    rel_str = str(rel).replace("\\", "/")
+                    if rel_str not in files:
+                        files.append(rel_str)
 
         return sorted(files)
 
     # ✅ FIXED: recursive listing for outputs (REQUIRED for pdf_pages, pdf_views)
     def list_output_files(self, job_id: str) -> List[str]:
         """List all output files for a job (recursive)."""
-        outputs_path = self.get_outputs_path(job_id)
-        if not outputs_path.exists():
-            return []
-
         files: List[str] = []
-        job_path = self.get_job_path(job_id)
-
-        for file_path in outputs_path.rglob("*"):
-            if file_path.is_file():
-                rel = file_path.relative_to(job_path)
-                files.append(str(rel).replace("\\", "/"))
+        for job_path in self._candidate_job_paths(job_id):
+            outputs_path = job_path / "outputs"
+            if not outputs_path.exists():
+                continue
+            for file_path in outputs_path.rglob("*"):
+                if file_path.is_file():
+                    rel = file_path.relative_to(job_path)
+                    rel_str = str(rel).replace("\\", "/")
+                    if rel_str not in files:
+                        files.append(rel_str)
 
         return sorted(files)
 
@@ -144,18 +155,18 @@ class FileStorage:
         if not self._is_safe_path(relative_path):
             raise HTTPException(status_code=400, detail="Invalid file path")
 
-        job_path = self.get_job_path(job_id)
-        file_path = job_path / relative_path
+        for job_path in self._candidate_job_paths(job_id):
+            file_path = job_path / relative_path
 
-        try:
-            file_path.resolve().relative_to(job_path.resolve())
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Path traversal detected")
+            try:
+                file_path.resolve().relative_to(job_path.resolve())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Path traversal detected")
 
-        if not file_path.exists() or not file_path.is_file():
-            raise HTTPException(status_code=404, detail="File not found")
+            if file_path.exists() and file_path.is_file():
+                return file_path, file_path.name, file_path.stat().st_size
 
-        return file_path, file_path.name, file_path.stat().st_size
+        raise HTTPException(status_code=404, detail="File not found")
 
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename to prevent path traversal."""

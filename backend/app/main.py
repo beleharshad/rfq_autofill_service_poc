@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq, envelope, llm, llm_pdf, preview3d
 from app.security import require_api_key, check_rate_limit
+from app.storage.paths import jobs_root, legacy_jobs_roots
 
 # In production (PRODUCTION=true) disable the interactive Swagger/ReDoc UIs so
 # the full API surface is not publicly browseable via /docs or /redoc.
@@ -115,12 +116,8 @@ async def _clear_stuck_pending_stubs() -> None:
     """
     import json as _json
     import logging as _logging
-    from pathlib import Path as _Path
 
     _log = _logging.getLogger(__name__)
-    jobs_root = _Path("data/jobs")
-    if not jobs_root.exists():
-        return
 
     _interrupted_stub = {
         "pending": False,
@@ -142,15 +139,23 @@ async def _clear_stuck_pending_stubs() -> None:
     }
 
     count = 0
-    for stub_path in jobs_root.glob("*/outputs/llm_analysis.json"):
-        try:
-            data = _json.loads(stub_path.read_text(encoding="utf-8-sig"))
-            if data.get("pending") is True:
-                stub_path.write_text(_json.dumps(_interrupted_stub, indent=2), encoding="utf-8")
-                count += 1
-                _log.info("Cleared stuck pending stub: %s", stub_path)
-        except Exception as exc:
-            _log.warning("Failed to check/clear pending stub %s: %s", stub_path, exc)
+    seen_roots = []
+    for root in [jobs_root(), *legacy_jobs_roots()]:
+        if root not in seen_roots:
+            seen_roots.append(root)
+
+    for root in seen_roots:
+        if not root.exists():
+            continue
+        for stub_path in root.glob("*/outputs/llm_analysis.json"):
+            try:
+                data = _json.loads(stub_path.read_text(encoding="utf-8-sig"))
+                if data.get("pending") is True:
+                    stub_path.write_text(_json.dumps(_interrupted_stub, indent=2), encoding="utf-8")
+                    count += 1
+                    _log.info("Cleared stuck pending stub: %s", stub_path)
+            except Exception as exc:
+                _log.warning("Failed to check/clear pending stub %s: %s", stub_path, exc)
 
     if count:
         _log.info("[startup] Cleared %d stuck pending LLM stub(s)", count)
