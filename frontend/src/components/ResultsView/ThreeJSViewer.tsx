@@ -21,6 +21,7 @@ const DIM_GOLD = '#FFD700';
 const DIM_CYAN = '#00D4FF';
 
 type CameraPreset = 'full' | 'section' | 'od' | 'id' | 'xray';
+type ToolbarVariant = 'full' | 'compact';
 
 interface ThreeJSViewerProps {
   summary: PartSummary;
@@ -30,6 +31,7 @@ interface ThreeJSViewerProps {
   showSlots?: boolean;
   showChamfers?: boolean;
   showFillets?: boolean;
+  toolbarVariant?: ToolbarVariant;
 }
 
 interface SegmentMeshProps {
@@ -246,6 +248,137 @@ interface GlbModelProps {
   cameraPreset: CameraPreset;
   cameraVersion: number;
   dims: ViewerDimensions;
+  showDims: boolean;
+}
+
+type AxisName = 'x' | 'y' | 'z';
+
+function axisVector(axis: AxisName, amount: number) {
+  return axis === 'x'
+    ? new THREE.Vector3(amount, 0, 0)
+    : axis === 'y'
+    ? new THREE.Vector3(0, amount, 0)
+    : new THREE.Vector3(0, 0, amount);
+}
+
+function axisValue(vector: THREE.Vector3, axis: AxisName) {
+  return axis === 'x' ? vector.x : axis === 'y' ? vector.y : vector.z;
+}
+
+function toPoint(vector: THREE.Vector3): [number, number, number] {
+  return [vector.x, vector.y, vector.z];
+}
+
+function resolveGlbAxes(size: THREE.Vector3, dims: ViewerDimensions) {
+  const axes = [
+    { axis: 'x' as const, size: Math.max(size.x, 1e-6) },
+    { axis: 'y' as const, size: Math.max(size.y, 1e-6) },
+    { axis: 'z' as const, size: Math.max(size.z, 1e-6) },
+  ];
+
+  let lengthAxis: AxisName = axes.slice().sort((a, b) => b.size - a.size)[0].axis;
+  const targetLength = dims.length && dims.length > 1e-6 ? dims.length : null;
+  const targetOd = dims.maxOd && dims.maxOd > 1e-6 ? dims.maxOd : null;
+  const targetRatio = dims.length && dims.maxOd && dims.maxOd > 1e-6
+    ? Math.max(dims.length / dims.maxOd, 1e-6)
+    : null;
+
+  if (targetLength && targetOd) {
+    let bestAxis = lengthAxis;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    axes.forEach((candidate) => {
+      const others = axes
+        .filter((entry) => entry.axis !== candidate.axis)
+        .sort((a, b) => b.size - a.size);
+      const scaleSamples = [
+        candidate.size / targetLength,
+        others[0].size / targetOd,
+        others[1].size / targetOd,
+      ].map((value) => Math.max(value, 1e-6));
+      const meanScale = scaleSamples.reduce((sum, value) => sum + value, 0) / scaleSamples.length;
+      const scaleScore = scaleSamples.reduce(
+        (sum, value, index) => sum + Math.abs(Math.log(value / meanScale)) * (index === 0 ? 1.4 : 1),
+        0,
+      );
+      const radialSymmetryScore = Math.abs(Math.log(others[0].size / others[1].size)) * 1.2;
+      const score = scaleScore + radialSymmetryScore;
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestAxis = candidate.axis;
+      }
+    });
+
+    lengthAxis = bestAxis;
+  } else if (targetRatio) {
+    let bestAxis = lengthAxis;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    axes.forEach((candidate) => {
+      const others = axes.filter((entry) => entry.axis !== candidate.axis);
+      const otherAvg = (others[0].size + others[1].size) / 2;
+      const ratio = candidate.size / Math.max(otherAvg, 1e-6);
+      const score = Math.abs(Math.log(ratio / targetRatio));
+      if (score < bestScore) {
+        bestScore = score;
+        bestAxis = candidate.axis;
+      }
+    });
+
+    lengthAxis = bestAxis;
+  }
+
+  const radialAxes = axes
+    .filter((entry) => entry.axis !== lengthAxis)
+    .sort((a, b) => b.size - a.size)
+    .map((entry) => entry.axis) as [AxisName, AxisName];
+
+  return { lengthAxis, radialAxes };
+}
+
+function buildGlbBasis(size: THREE.Vector3, dims: ViewerDimensions) {
+  const { lengthAxis, radialAxes } = resolveGlbAxes(size, dims);
+  return {
+    lengthAxis,
+    radialAxes,
+    lengthDir: axisVector(lengthAxis, 1),
+    radialDirA: axisVector(radialAxes[0], 1),
+    radialDirB: axisVector(radialAxes[1], 1),
+    lengthSize: axisValue(size, lengthAxis),
+    radialSizeA: axisValue(size, radialAxes[0]),
+    radialSizeB: axisValue(size, radialAxes[1]),
+  };
+}
+
+function getGlbPresetOffset(
+  preset: CameraPreset,
+  lengthDir: THREE.Vector3,
+  upDir: THREE.Vector3,
+  depthDir: THREE.Vector3,
+  dist: number,
+) {
+  const build = (alongLength: number, alongUp: number, alongDepth: number, scale = 1) =>
+    lengthDir.clone()
+      .multiplyScalar(alongLength)
+      .add(upDir.clone().multiplyScalar(alongUp))
+      .add(depthDir.clone().multiplyScalar(alongDepth))
+      .normalize()
+      .multiplyScalar(dist * scale);
+
+  switch (preset) {
+    case 'id':
+      return lengthDir.clone().multiplyScalar(dist);
+    case 'od':
+      return build(0.04, 0.12, 1.08, 1.02);
+    case 'section':
+      return build(0.06, 0.62, 0.88, 1.04);
+    case 'xray':
+      return build(0.05, 0.28, 1.0, 1.02);
+    case 'full':
+    default:
+      return build(0.05, 0.34, 0.96, 1.02);
+  }
 }
 
 /**
@@ -272,70 +405,144 @@ function GlbFitCamera({
   useEffect(() => {
     const key = `${scene.uuid}-${preset}-${version}`;
     if (fittedKey.current === key) return;
-    fittedKey.current = key;
+    let raf = 0;
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 24;
 
-    const box = new THREE.Box3().setFromObject(scene);
-    if (box.isEmpty()) return;
+    const fitCamera = () => {
+      scene.updateWorldMatrix(true, true);
 
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const box = new THREE.Box3().setFromObject(scene);
+      if (box.isEmpty()) return false;
 
-    const axes = [
-      { axis: 'x' as const, size: size.x, min: box.min.x, max: box.max.x },
-      { axis: 'y' as const, size: size.y, min: box.min.y, max: box.max.y },
-      { axis: 'z' as const, size: size.z, min: box.min.z, max: box.max.z },
-    ].sort((a, b) => b.size - a.size);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      if (!Number.isFinite(sphere.radius) || sphere.radius <= 1e-6) return false;
 
-    const longestAxis = axes[0].axis;
+      const { lengthDir, radialDirA, radialDirB } = buildGlbBasis(size, dims);
+      const upDir = radialDirA.clone().normalize();
+      const depthDir = radialDirB.clone().normalize();
 
-    const fovRad = 18 * Math.PI / 180;
-    const dist = (sphere.radius / Math.sin(fovRad)) * 1.08;
+      const fovRad = 18 * Math.PI / 180;
+      const dist = (sphere.radius / Math.sin(fovRad)) * 1.08;
 
-    const axisVector = (axis: 'x' | 'y' | 'z', amount: number) =>
-      axis === 'x'
-        ? new THREE.Vector3(amount, 0, 0)
-        : axis === 'y'
-        ? new THREE.Vector3(0, amount, 0)
-        : new THREE.Vector3(0, 0, amount);
+      const camPos = center.clone().add(getGlbPresetOffset(preset, lengthDir, upDir, depthDir, dist));
 
-    const diagonal = (x: number, y: number, z: number, scale = 1.0) =>
-      new THREE.Vector3(x, y, z).normalize().multiplyScalar(dist * scale);
+      camera.up.copy(upDir);
+      camera.position.copy(camPos);
+      camera.lookAt(center);
+      camera.near = Math.max(dist * 0.0001, 0.0002);
+      camera.far = dist * 25;
+      camera.updateProjectionMatrix();
 
-    let camPos = center.clone();
-    if (preset === 'id') {
-      camPos.add(axisVector(longestAxis, dist));
-    } else if (preset === 'od') {
-      camPos.add(diagonal(1.15, 0.18, 0.72, 1.0));
-    } else if (preset === 'section') {
-      camPos.add(diagonal(0.92, 0.74, 1.04, 1.03));
-    } else if (preset === 'xray') {
-      camPos.add(diagonal(1.02, 0.42, 1.08, 1.0));
-    } else {
-      // Full: stable isometric corner view for arbitrary uploaded STEP solids.
-      camPos.add(diagonal(1.06, 0.52, 1.0, 1.0));
-    }
+      if (controls) {
+        const orbit = controls as any;
+        orbit.target.copy(center);
+        orbit.object?.position?.copy?.(camPos);
+        const wasEnabled = orbit.enableDamping;
+        orbit.enableDamping = false;
+        orbit.update();
+        orbit.enableDamping = wasEnabled;
+      }
+      fittedKey.current = key;
+      return true;
+    };
 
-    // Keep camera roll stable.
-    camera.up.set(0, 1, 0);
+    const scheduleFit = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const fitted = fitCamera();
+      if (!fitted && attempts < maxAttempts) {
+        raf = requestAnimationFrame(scheduleFit);
+      }
+    };
 
-    camera.position.copy(camPos);
-    camera.lookAt(center);
-    camera.near = Math.max(dist * 0.0001, 0.0002);
-    camera.far = dist * 25;
-    camera.updateProjectionMatrix();
+    scheduleFit();
 
-    if (controls) {
-      const orbit = controls as any;
-      orbit.target.copy(center);
-      const wasEnabled = orbit.enableDamping;
-      orbit.enableDamping = false;
-      orbit.update();
-      orbit.enableDamping = wasEnabled;
-    }
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
   }, [scene, preset, version, camera, controls, dims.length, dims.maxOd, dims.maxRadius]);
 
   return null;
+}
+
+function GlbDimOverlays({
+  scene,
+  dims,
+  visible,
+}: {
+  scene: THREE.Object3D;
+  dims: ViewerDimensions;
+  visible: boolean;
+}) {
+  const overlay = useMemo(() => {
+    if (!visible || !dims.length || !dims.maxOd) return null;
+
+    const box = new THREE.Box3().setFromObject(scene);
+    if (box.isEmpty()) return null;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const { lengthDir, radialDirA, radialDirB, lengthSize, radialSizeA, radialSizeB } = buildGlbBasis(size, dims);
+
+    const halfLength = lengthSize / 2;
+    const halfOd = radialSizeA / 2;
+    const maxSpan = Math.max(lengthSize, radialSizeA, radialSizeB, 1e-6);
+    const tick = maxSpan * 0.035;
+    const sideOffset = radialDirB.clone().multiplyScalar(radialSizeB * 0.82);
+    const upperOffset = radialDirA.clone().multiplyScalar(radialSizeA * 0.9);
+
+    const lengthStart = center.clone().add(sideOffset).add(upperOffset).add(lengthDir.clone().multiplyScalar(-halfLength));
+    const lengthEnd = center.clone().add(sideOffset).add(upperOffset).add(lengthDir.clone().multiplyScalar(halfLength));
+
+    const odCenter = center.clone().add(sideOffset.clone().multiplyScalar(0.72)).add(lengthDir.clone().multiplyScalar(lengthSize * 0.18));
+    const odStart = odCenter.clone().add(radialDirA.clone().multiplyScalar(-halfOd));
+    const odEnd = odCenter.clone().add(radialDirA.clone().multiplyScalar(halfOd));
+
+    const boreRatio = dims.boreId && dims.maxOd && dims.maxOd > 1e-6 ? Math.min(Math.max(dims.boreId / dims.maxOd, 0.06), 0.92) : 0;
+    const boreHalf = halfOd * boreRatio;
+    const idCenter = center.clone().add(sideOffset.clone().multiplyScalar(0.46)).add(lengthDir.clone().multiplyScalar(-lengthSize * 0.16));
+    const idStart = idCenter.clone().add(radialDirA.clone().multiplyScalar(-boreHalf));
+    const idEnd = idCenter.clone().add(radialDirA.clone().multiplyScalar(boreHalf));
+
+    return {
+      lengthStart,
+      lengthEnd,
+      odStart,
+      odEnd,
+      idStart,
+      idEnd,
+      tickDirLength: radialDirA.clone().multiplyScalar(tick),
+      tickDirRadial: lengthDir.clone().multiplyScalar(tick),
+      showBore: boreHalf > maxSpan * 0.015,
+    };
+  }, [scene, dims, visible]);
+
+  if (!overlay) return null;
+
+  return (
+    <>
+      <Line points={[toPoint(overlay.lengthStart), toPoint(overlay.lengthEnd)]} color={DIM_GOLD} lineWidth={1.25} />
+      <Line points={[toPoint(overlay.lengthStart.clone().sub(overlay.tickDirLength)), toPoint(overlay.lengthStart.clone().add(overlay.tickDirLength))]} color={DIM_GOLD} lineWidth={1.5} />
+      <Line points={[toPoint(overlay.lengthEnd.clone().sub(overlay.tickDirLength)), toPoint(overlay.lengthEnd.clone().add(overlay.tickDirLength))]} color={DIM_GOLD} lineWidth={1.5} />
+
+      <Line points={[toPoint(overlay.odStart), toPoint(overlay.odEnd)]} color={DIM_GOLD} lineWidth={1.25} />
+      <Line points={[toPoint(overlay.odStart.clone().sub(overlay.tickDirRadial)), toPoint(overlay.odStart.clone().add(overlay.tickDirRadial))]} color={DIM_GOLD} lineWidth={1.5} />
+      <Line points={[toPoint(overlay.odEnd.clone().sub(overlay.tickDirRadial)), toPoint(overlay.odEnd.clone().add(overlay.tickDirRadial))]} color={DIM_GOLD} lineWidth={1.5} />
+
+      {overlay.showBore && (
+        <>
+          <Line points={[toPoint(overlay.idStart), toPoint(overlay.idEnd)]} color={DIM_CYAN} lineWidth={1.2} />
+          <Line points={[toPoint(overlay.idStart.clone().sub(overlay.tickDirRadial.clone().multiplyScalar(0.7))), toPoint(overlay.idStart.clone().add(overlay.tickDirRadial.clone().multiplyScalar(0.7)))]} color={DIM_CYAN} lineWidth={1.4} />
+          <Line points={[toPoint(overlay.idEnd.clone().sub(overlay.tickDirRadial.clone().multiplyScalar(0.7))), toPoint(overlay.idEnd.clone().add(overlay.tickDirRadial.clone().multiplyScalar(0.7)))]} color={DIM_CYAN} lineWidth={1.4} />
+        </>
+      )}
+    </>
+  );
 }
 
 interface ViewerDimensions {
@@ -362,6 +569,7 @@ interface PdfViewerToolbarProps {
   showDims: boolean;
   onShowDimsChange: (show: boolean) => void;
   onResetView: () => void;
+  variant?: ToolbarVariant;
 }
 
 interface DimOverlaysProps {
@@ -525,17 +733,20 @@ function PdfViewerToolbar({
   showDims,
   onShowDimsChange,
   onResetView,
+  variant = 'full',
 }: PdfViewerToolbarProps) {
+  const compact = variant === 'compact';
+
   return (
     <div className="pdf-toolbar">
       <ToolbarButton label="Full" active={cameraPreset === 'full'} onClick={() => onCameraPresetChange('full')} title="OD exterior + open bore face" />
       <ToolbarButton label="Section" active={cameraPreset === 'section'} onClick={() => onCameraPresetChange('section')} title="Half-section style camera" />
-      <ToolbarButton label="OD" active={cameraPreset === 'od'} onClick={() => onCameraPresetChange('od')} title="Side profile" />
-      <ToolbarButton label="ID" active={cameraPreset === 'id'} onClick={() => onCameraPresetChange('id')} title="End-on bore" />
-      <ToolbarButton label="X-Ray" active={cameraPreset === 'xray'} onClick={() => onCameraPresetChange('xray')} title="Transparent shell" />
+      {!compact && <ToolbarButton label="OD" active={cameraPreset === 'od'} onClick={() => onCameraPresetChange('od')} title="Side profile" />}
+      {!compact && <ToolbarButton label="ID" active={cameraPreset === 'id'} onClick={() => onCameraPresetChange('id')} title="End-on bore" />}
+      {!compact && <ToolbarButton label="X-Ray" active={cameraPreset === 'xray'} onClick={() => onCameraPresetChange('xray')} title="Transparent shell" />}
       <div className="pdf-toolbar-divider" />
       <ToolbarButton label="Dims" active={showDims} onClick={() => onShowDimsChange(!showDims)} title="Toggle dim overlays" />
-      <ToolbarButton label="⟳" onClick={onResetView} title="Reset camera" />
+      {!compact && <ToolbarButton label="⟳" onClick={onResetView} title="Reset camera" />}
     </div>
   );
 }
@@ -684,8 +895,20 @@ function SceneCameraDriver({ position, target, version }: SceneCameraDriverProps
   return null;
 }
 
-function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModelProps) {
+function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims, showDims }: GlbModelProps) {
   const gltf = useLoader(GLTFLoader, url);
+  const clippingPlanes = useMemo(() => {
+    if (cameraPreset !== 'section') return [] as THREE.Plane[];
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    if (box.isEmpty()) return [] as THREE.Plane[];
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const { radialDirB } = buildGlbBasis(size, dims);
+    const normal = radialDirB.clone().normalize();
+    return [new THREE.Plane(normal, -center.dot(normal))];
+  }, [cameraPreset, dims, gltf.scene]);
   
   // Traverse the scene and update materials based on view mode
   useEffect(() => {
@@ -719,20 +942,21 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               let newMaterial: THREE.Material;
               if (viewMode === 'realistic') {
                 newMaterial = new THREE.MeshPhysicalMaterial({
-                  color: new THREE.Color(color).lerp(new THREE.Color('#d4dde6'), 0.84),
-                  metalness: 0.92,
-                  roughness: 0.12,
-                  clearcoat: 0.86,
-                  clearcoatRoughness: 0.07,
-                  reflectivity: 0.96,
-                  envMapIntensity: 1.7,
+                  color: new THREE.Color(color).lerp(new THREE.Color('#c3cfdb'), 0.88),
+                  metalness: 1,
+                  roughness: 0.07,
+                  clearcoat: 1,
+                  clearcoatRoughness: 0.03,
+                  reflectivity: 1,
+                  envMapIntensity: 2.8,
                   specularIntensity: 1,
                   specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-                  emissive: new THREE.Color('#1a222c'),
-                  emissiveIntensity: 0.04,
+                  emissive: new THREE.Color('#0f151d'),
+                  emissiveIntensity: 0.015,
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
+                  clippingPlanes,
                 });
               } else if (viewMode === 'xray') {
                 newMaterial = new THREE.MeshStandardMaterial({
@@ -742,6 +966,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
                   transparent: true,
                   opacity: 0.7,
                   side: THREE.DoubleSide,
+                  clippingPlanes,
                 });
               } else {
                 newMaterial = new THREE.MeshPhysicalMaterial({
@@ -756,6 +981,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
                   transparent: false,
                   opacity: 1.0,
                   side: THREE.DoubleSide,
+                  clippingPlanes,
                 });
               }
               
@@ -773,20 +999,21 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
           // No material, create a default material based on view mode
           if (viewMode === 'realistic') {
             child.material = new THREE.MeshPhysicalMaterial({
-              color: new THREE.Color('#d4dde6'),
-              metalness: 0.92,
-              roughness: 0.12,
-              clearcoat: 0.86,
-              clearcoatRoughness: 0.07,
-              reflectivity: 0.96,
-              envMapIntensity: 1.7,
+              color: new THREE.Color('#c3cfdb'),
+              metalness: 1,
+              roughness: 0.07,
+              clearcoat: 1,
+              clearcoatRoughness: 0.03,
+              reflectivity: 1,
+              envMapIntensity: 2.8,
               specularIntensity: 1,
               specularColor: new THREE.Color(VIEWER_HIGHLIGHT),
-              emissive: new THREE.Color('#1a222c'),
-              emissiveIntensity: 0.04,
+              emissive: new THREE.Color('#0f151d'),
+              emissiveIntensity: 0.015,
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
+              clippingPlanes,
             });
           } else if (viewMode === 'xray') {
             child.material = new THREE.MeshStandardMaterial({
@@ -796,6 +1023,7 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               transparent: true,
               opacity: 0.7,
               side: THREE.DoubleSide,
+              clippingPlanes,
             });
           } else {
             child.material = new THREE.MeshPhysicalMaterial({
@@ -810,16 +1038,18 @@ function GlbModel({ url, viewMode, cameraPreset, cameraVersion, dims }: GlbModel
               transparent: false,
               opacity: 1.0,
               side: THREE.DoubleSide,
+              clippingPlanes,
             });
           }
         }
       }
     });
-  }, [gltf, viewMode]);
+  }, [clippingPlanes, gltf, viewMode]);
   
   return (
     <>
       <primitive object={gltf.scene} />
+      <GlbDimOverlays scene={gltf.scene} dims={dims} visible={showDims} />
       <GlbFitCamera scene={gltf.scene} preset={cameraPreset} version={cameraVersion} dims={dims} />
     </>
   );
@@ -1272,6 +1502,7 @@ function Scene({
   forceGlbOnly = false,
   cameraPreset = 'full',
   cameraVersion = 0,
+  showDims = true,
 }: {
   summary: PartSummary;
   showOD: boolean;
@@ -1293,6 +1524,7 @@ function Scene({
   forceGlbOnly?: boolean;
   cameraPreset?: CameraPreset;
   cameraVersion?: number;
+  showDims?: boolean;
 }) {
   // Enable hover detection
   useHoverDetection(jobId, onHoverChange);
@@ -1342,7 +1574,7 @@ function Scene({
       {/* Render GLB model if available, otherwise procedural */}
       {glbUrl ? (
         <Suspense fallback={null}>
-          <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} dims={getViewerDimensions(summary)} />
+          <GlbModel url={glbUrl} viewMode={viewMode} cameraPreset={cameraPreset} cameraVersion={cameraVersion} dims={getViewerDimensions(summary)} showDims={showDims} />
         </Suspense>
       ) : !forceGlbOnly ? (
         <>
@@ -1578,7 +1810,8 @@ function ThreeJSViewer({
   showHoles = false,
   showSlots = false,
   showChamfers = false,
-  showFillets = false
+  showFillets = false,
+  toolbarVariant = 'full',
 }: ThreeJSViewerProps) {
   const dims = useMemo(() => getViewerDimensions(summary), [summary]);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('full');
@@ -1724,7 +1957,7 @@ function ThreeJSViewer({
     if (cameraPreset === 'id') return [0, 0, dims.minZ];
     return [0, 0, dims.midZ];
   }, [cameraPreset, dims.minZ, dims.midZ]);
-  const glbCameraPreset: CameraPreset = glbUrl ? 'xray' : cameraPreset;
+  const glbCameraPreset: CameraPreset = cameraPreset;
   const cameraPosition = useMemo<[number, number, number]>(() => {
     // IMPORTANT: For lathe/turned parts the turning axis is Z. To see the side profile
     // the camera Z must stay near dims.midZ so the look vector has near-zero Z component.
@@ -1778,6 +2011,7 @@ function ThreeJSViewer({
             gl.toneMapping = THREE.ACESFilmicToneMapping;
             gl.toneMappingExposure = 1.1;
             gl.outputColorSpace = THREE.SRGBColorSpace;
+            gl.localClippingEnabled = true;
           }}
           shadows={renderViewMode === 'realistic'}
           style={{ background: VIEWER_BG }}
@@ -1833,6 +2067,7 @@ function ThreeJSViewer({
             forceGlbOnly={isStepBacked}
             cameraPreset={glbCameraPreset}
             cameraVersion={cameraVersion}
+            showDims={showDims}
           />
           {/* DimOverlays use part_summary coordinate space — only valid for procedural (non-GLB) mode */}
           {!glbUrl && <DimOverlays dims={dims} visible={showDims} />}
@@ -1879,6 +2114,7 @@ function ThreeJSViewer({
         showDims={showDims}
         onShowDimsChange={setShowDims}
         onResetView={handleResetView}
+        variant={toolbarVariant}
       />
     </div>
   );

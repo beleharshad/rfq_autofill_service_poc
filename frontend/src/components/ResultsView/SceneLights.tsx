@@ -31,14 +31,45 @@ export function SceneLights({
     const size = quality === 'high' ? 512 : 256;
     const data = new Uint8Array(4 * size * size);
 
-    // Slight gradient-ish studio neutral (light grey)
-    const top = new THREE.Color(0.78, 0.78, 0.78);
-    const bottom = new THREE.Color(0.62, 0.62, 0.62);
+    const backdropTop = new THREE.Color('#3b4652');
+    const backdropMid = new THREE.Color('#1f2731');
+    const backdropBottom = new THREE.Color('#0f141a');
+    const fillColor = new THREE.Color('#cfd8e3');
+    const coolSoftbox = new THREE.Color('#f4f8ff');
+    const warmSoftbox = new THREE.Color('#fff1d9');
+
+    const gaussian = (value: number, center: number, width: number) => {
+      const delta = (value - center) / width;
+      return Math.exp(-(delta * delta));
+    };
 
     for (let y = 0; y < size; y++) {
-      const t = y / (size - 1);
-      const c = bottom.clone().lerp(top, t);
+      const v = y / (size - 1);
+      const base = backdropBottom
+        .clone()
+        .lerp(backdropMid, Math.min(v * 1.35, 1))
+        .lerp(backdropTop, Math.max((v - 0.58) / 0.42, 0));
+
       for (let x = 0; x < size; x++) {
+        const u = x / (size - 1);
+        const c = base.clone();
+
+        const leftPanel = gaussian(u, 0.21, 0.055) * gaussian(v, 0.64, 0.17);
+        const rightPanel = gaussian(u, 0.78, 0.06) * gaussian(v, 0.60, 0.16);
+        const topStrip = gaussian(v, 0.84, 0.08) * (0.45 + gaussian(u, 0.52, 0.24));
+        const frontFill = gaussian(u, 0.5, 0.22) * gaussian(v, 0.48, 0.26);
+        const horizonGlow = gaussian(v, 0.35, 0.1) * gaussian(u, 0.52, 0.35);
+
+        c.add(coolSoftbox.clone().multiplyScalar(leftPanel * 2.8));
+        c.add(warmSoftbox.clone().multiplyScalar(rightPanel * 2.35));
+        c.add(fillColor.clone().multiplyScalar(topStrip * 1.35));
+        c.add(fillColor.clone().multiplyScalar(frontFill * 0.85));
+        c.add(new THREE.Color('#8fa6bd').multiplyScalar(horizonGlow * 0.5));
+
+        c.r = Math.min(c.r, 1);
+        c.g = Math.min(c.g, 1);
+        c.b = Math.min(c.b, 1);
+
         const i = (y * size + x) * 4;
         data[i] = Math.floor(c.r * 255);
         data[i + 1] = Math.floor(c.g * 255);
@@ -99,12 +130,13 @@ export function SceneLights({
     return (
       <>
         {/* Base ambient */}
-        <ambientLight intensity={0.32} />
+        <ambientLight intensity={0.24} color="#d8e2ee" />
 
         {/* Key */}
         <directionalLight
-          position={[7, 10, 7]}
-          intensity={2.15}
+          position={[6, 8, 11]}
+          intensity={2.8}
+          color="#ffffff"
           castShadow={enableShadows}
           shadow-mapSize-width={shadowMapSize}
           shadow-mapSize-height={shadowMapSize}
@@ -116,16 +148,19 @@ export function SceneLights({
         />
 
         {/* Fill */}
-        <directionalLight position={[-6, 7, -4]} intensity={0.8} color="#b8d4f0" />
+        <directionalLight position={[-8, 6, -3]} intensity={1.15} color="#dbe8f8" />
 
         {/* Rim */}
-        <directionalLight position={[0, 4, -10]} intensity={0.62} color="#dbe8f6" />
+        <directionalLight position={[2, 5, -12]} intensity={0.95} color="#f7fbff" />
 
         {/* Subtle top highlight */}
-        <pointLight position={[0, 12, 0]} intensity={0.42} color="#f7fbff" />
+        <pointLight position={[0, 12, 2]} intensity={0.68} color="#f7fbff" />
 
         {/* Front sparkle */}
-        <pointLight position={[4, 2, 8]} intensity={0.24} color="#ffffff" />
+        <pointLight position={[3.5, 2.5, 9]} intensity={0.72} color="#ffffff" />
+
+        {/* Opposite sparkle for edge rolloff */}
+        <pointLight position={[-5, 1.5, 7]} intensity={0.32} color="#d5e5ff" />
       </>
     );
   }, [viewMode, enableShadows, quality]);
