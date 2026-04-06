@@ -45,6 +45,44 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
+function buildSyntheticStepReview(partSummary: any) {
+  if (!partSummary) return null;
+  const inference = partSummary?.inference_metadata || {};
+  const selectedBody = partSummary?.selected_body || {};
+  const source = String(inference?.source || selectedBody?.inference_metadata?.source || '');
+  const warnings: string[] = Array.isArray(partSummary?.warnings) ? partSummary.warnings : [];
+  const crossChecks: string[] = [
+    'No validated LLM analysis is available for this STEP job yet.',
+    'Displayed dimensions are geometry-derived estimates and must be reviewed before use.',
+  ];
+
+  if (source.includes('bbox_fallback')) {
+    crossChecks.push('STEP feature extraction fell back to bounding-box analysis, so OD / ID / length may reflect the outer envelope rather than final finish dimensions.');
+  }
+  if (selectedBody?.analysis_warning) {
+    crossChecks.push(String(selectedBody.analysis_warning));
+  }
+  if (warnings.length > 0) {
+    crossChecks.push(...warnings.map(String));
+  }
+  if ((partSummary?.body_candidates || []).length > 1) {
+    crossChecks.push('Multiple STEP bodies were detected; shown values may correspond to the selected body or assembly envelope rather than the intended finished part.');
+  }
+  if ((partSummary?.step_metadata || {}).representation_context) {
+    crossChecks.push(`STEP representation context: ${String(partSummary.step_metadata.representation_context)}.`);
+  }
+
+  return {
+    extracted: null,
+    validation: {
+      recommendation: 'REVIEW',
+      overall_confidence: Math.min(0.6, Number(inference?.overall_confidence ?? 0.5) || 0.5),
+      cross_checks: crossChecks,
+    },
+    synthetic: true,
+  };
+}
+
 /** Merge LLM extracted dims with optional user overrides (null = use LLM). */
 export function effectiveDims(
   llm: any,
@@ -607,11 +645,17 @@ function AutoConvertResults({
 
   const segments: Segment[] = inferredStack?.segments || partSummary?.segments || [];
   const ed = effectiveDims(llmAnalysis, { od: odOvr, maxOd: maxOdOvr, id: idOvr, len: lenOvr });
-
-  const recommendation = llmAnalysis?.validation?.recommendation;
-  const overallConf    = llmAnalysis?.validation?.overall_confidence;
-  const crossChecks: string[] = llmAnalysis?.validation?.cross_checks || [];
   const isStepBacked = ((partSummary as any)?.inference_metadata?.source || '').startsWith('uploaded_step');
+
+  const synthesizedStepReview = useMemo(() => {
+    if (llmAnalysis || !isStepBacked || !partSummary) return null;
+    return buildSyntheticStepReview(partSummary);
+  }, [isStepBacked, llmAnalysis, partSummary]);
+
+  const analysisForDisplay = llmAnalysis || synthesizedStepReview;
+  const recommendation = analysisForDisplay?.validation?.recommendation;
+  const overallConf    = analysisForDisplay?.validation?.overall_confidence;
+  const crossChecks: string[] = analysisForDisplay?.validation?.cross_checks || [];
 
   // Build lathe segments from overrides or raw segments.
   // When coming from raw segments, propagate the LLM bore (id_in) so the 3-D profile
@@ -818,17 +862,17 @@ function AutoConvertResults({
 
         {/* Right: dims card + 3D viewer */}
         <div className="acr-right">
-          {llmAnalysis && (
+          {analysisForDisplay && (
             <div className="acr-dims-card">
               {/* ── LLM pending (background pipeline still running) ── */}
-              {llmAnalysis.pending ? (
+              {llmAnalysis?.pending ? (
                 <div className="acr-dims-header">
                   <span className="acr-rec-badge acr-rec-badge--pending">⏳ Analyzing…</span>
                   <span className="acr-material" style={{ fontSize: '0.75rem', opacity: 0.7 }}>
                     Extraction running in background
                   </span>
                 </div>
-              ) : llmAnalysis.error ? (
+              ) : llmAnalysis?.error ? (
                 /* ── LLM error (rate limit or pipeline failure) ── */
                 <>
                   <div className="acr-dims-header">
@@ -849,7 +893,7 @@ function AutoConvertResults({
                     >
                       {recommendation || 'UNKNOWN'} · {overallConf != null ? `${Math.round(overallConf * 100)}%` : '—'}
                     </span>
-                    {llmAnalysis.extracted?.material && (
+                    {llmAnalysis?.extracted?.material && (
                       <span className="acr-material">{llmAnalysis.extracted.material}</span>
                     )}
                   </div>
@@ -860,44 +904,48 @@ function AutoConvertResults({
                     </ul>
                   )}
 
-                  <div className="acr-dim-rows">
-                    <DimRow
-                      label="OD (in)"
-                      base={llmAnalysis.extracted?.od_in}
-                      override={odOvr}
-                      onOverride={setOdOvr}
-                      min={0.001} max={24} step={0.001}
-                    />
-                    <DimRow
-                      label="MAX OD (in)"
-                      base={llmAnalysis.extracted?.max_od_in ?? llmAnalysis.extracted?.od_in}
-                      override={maxOdOvr}
-                      onOverride={setMaxOdOvr}
-                      min={0.001} max={24} step={0.001}
-                    />
-                    <DimRow
-                      label="ID (in)"
-                      base={llmAnalysis.extracted?.id_in}
-                      override={idOvr}
-                      onOverride={setIdOvr}
-                      min={0} max={24} step={0.001}
-                    />
-                    <DimRow
-                      label="Length (in)"
-                      base={llmAnalysis.extracted?.length_in}
-                      override={lenOvr}
-                      onOverride={setLenOvr}
-                      min={0.001} max={120} step={0.001}
-                    />
-                  </div>
+                  {llmAnalysis?.extracted && (
+                    <>
+                      <div className="acr-dim-rows">
+                        <DimRow
+                          label="OD (in)"
+                          base={llmAnalysis.extracted?.od_in}
+                          override={odOvr}
+                          onOverride={setOdOvr}
+                          min={0.001} max={24} step={0.001}
+                        />
+                        <DimRow
+                          label="MAX OD (in)"
+                          base={llmAnalysis.extracted?.max_od_in ?? llmAnalysis.extracted?.od_in}
+                          override={maxOdOvr}
+                          onOverride={setMaxOdOvr}
+                          min={0.001} max={24} step={0.001}
+                        />
+                        <DimRow
+                          label="ID (in)"
+                          base={llmAnalysis.extracted?.id_in}
+                          override={idOvr}
+                          onOverride={setIdOvr}
+                          min={0} max={24} step={0.001}
+                        />
+                        <DimRow
+                          label="Length (in)"
+                          base={llmAnalysis.extracted?.length_in}
+                          override={lenOvr}
+                          onOverride={setLenOvr}
+                          min={0.001} max={120} step={0.001}
+                        />
+                      </div>
 
-                  {(odOvr !== null || maxOdOvr !== null || idOvr !== null || lenOvr !== null) && (
-                    <button
-                      className="acr-reset-btn"
-                      onClick={() => { setOdOvr(null); setMaxOdOvr(null); setIdOvr(null); setLenOvr(null); }}
-                    >
-                      ↺ Reset all overrides
-                    </button>
+                      {(odOvr !== null || maxOdOvr !== null || idOvr !== null || lenOvr !== null) && (
+                        <button
+                          className="acr-reset-btn"
+                          onClick={() => { setOdOvr(null); setMaxOdOvr(null); setIdOvr(null); setLenOvr(null); }}
+                        >
+                          ↺ Reset all overrides
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               )}

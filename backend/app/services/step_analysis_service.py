@@ -37,7 +37,7 @@ You are analyzing a STEP CAD model summary, not a PDF drawing and not OCR text.
 
 Your job is to extract manufacturing-relevant dimensions from CAD geometry only.
 You are given ONE selected body summary plus a short list of alternative bodies.
-Use ONLY the provided STEP metadata, selected-body geometry summary, alternative-body shortlist, and deterministic candidates.
+Use ONLY the provided STEP metadata, selected-body geometry summary, alternative-body shortlist, and deterministic candidate pack.
 
 Do NOT invent or guess:
 - material
@@ -84,24 +84,30 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Geometry-first rules:
-1. Use the selected body as the primary source of OD / ID / length.
-2. Treat the alternative-body shortlist as comparison context only. Do not blend dimensions across bodies.
-3. `od_in`
+1. Start with the selected body, but you MAY override it and use ONE alternative body when the selected body is weak.
+2. Treat the alternative-body shortlist as comparison context only unless one alternative is clearly stronger. Never blend dimensions across multiple bodies.
+3. Prefer the highest-scoring feature-extracted turned body when it is materially more trustworthy than a bbox-fallback body.
+4. If the selected body uses bbox fallback, has null key dimensions, or conflicts with a clearly stronger feature-extracted alternative, prefer the stronger feature-extracted alternative.
+5. `od_in`
 	 - Use the largest finished outer diameter visible in the selected-body geometry summary.
 	 - Prefer segment OD values / totals over file-name heuristics.
-4. `length_in`
+	 - Ignore tiny sliver segments, zero-length transitions, detached helper solids, and local protrusions that are not the main finished turned envelope.
+6. `length_in`
 	 - Use the full finished axial span from the selected-body geometry summary.
 	 - Do not confuse local feature lengths with overall part length.
-5. `id_in` and `max_id_in`
+	 - Ignore tiny end slivers, short construction fragments, and detached secondary bodies.
+7. `id_in` and `max_id_in`
 	 - Consider only positive internal bore diameters from the selected body.
+	 - Prefer bore diameters that persist over meaningful axial span or recur across multiple segments.
+	 - Ignore incidental micro-bores, spot features, local chamfer transitions, and very short counterbores unless they are clearly the finished bore.
 	 - If one positive bore exists: `id_in = max_id_in = that bore`.
 	 - If multiple positive bores exist: `id_in = smallest`, `max_id_in = largest`.
 	 - If no positive bore exists, both should be null.
-6. `max_od_in` and `max_length_in`
+8. `max_od_in` and `max_length_in`
 	 - STEP files usually describe finished geometry, not raw stock.
 	 - If no explicit raw-stock information exists, set `max_od_in = od_in` and `max_length_in = length_in`.
 	 - Mention this fallback in `cross_checks` and the affected field `issue`.
-7. Metadata fields
+9. Metadata fields
 	 - `part_number` may come from a trustworthy STEP product id or file stem.
 	 - `part_name` may come from a trustworthy STEP product name or file stem.
 	 - Keep unsupported metadata null.
@@ -112,7 +118,9 @@ Metadata quality rules:
 - Do not blindly trust internal CAD-export identifiers as customer-facing part names.
 
 Multi-body / assembly rules:
-- If multiple solids exist, trust the selected body but mention ambiguity when alternate candidates are plausible.
+- If multiple solids exist, prefer one authoritative body only.
+- If an alternative body has higher score, feature extraction success, and more plausible turned dimensions than the selected body, use that alternative body instead.
+- Mention ambiguity when alternate candidates are plausible.
 - If the selection score is weak or alternatives are close, prefer `REVIEW`.
 
 Validation rules:
@@ -128,7 +136,7 @@ STEP METADATA:
 SELECTED BODY + ALTERNATIVES:
 {geometry_json}
 
-DETERMINISTIC CANDIDATES:
+DETERMINISTIC CANDIDATE PACK:
 {candidate_json}
 """
 
@@ -282,7 +290,7 @@ class StepAnalysisService:
 		prompt = _STEP_ANALYSIS_PROMPT.format(
 			metadata_json=json.dumps(metadata, indent=2),
 			geometry_json=json.dumps(self._build_llm_geometry_payload(part_summary), indent=2),
-			candidate_json=json.dumps(deterministic.get("extracted", {}), indent=2),
+			candidate_json=json.dumps(self._build_llm_candidate_payload(part_summary, deterministic), indent=2),
 		)
 
 		result = deterministic
@@ -742,6 +750,87 @@ class StepAnalysisService:
 			"warnings": part_summary.get("warnings") or [],
 		}
 
+	def _build_llm_candidate_payload(
+		self,
+		part_summary: Dict[str, Any],
+		deterministic: Dict[str, Any],
+	) -> Dict[str, Any]:
+		body_candidates = copy.deepcopy(part_summary.get("body_candidates") or [])
+		selected_body = copy.deepcopy(part_summary.get("selected_body") or {})
+		feature_candidates = [
+			candidate
+			for candidate in body_candidates
+			if str(candidate.get("extraction_method") or "") == "feature"
+		]
+		feature_candidates.sort(key=lambda candidate: float(candidate.get("score") or 0.0), reverse=True)
+		best_feature = feature_candidates[0] if feature_candidates else None
+
+		return {
+			"deterministic_extracted": copy.deepcopy(deterministic.get("extracted") or {}),
+			"selected_body_index": selected_body.get("body_index"),
+			"selected_body_score": selected_body.get("score"),
+			"selected_body_method": selected_body.get("extraction_method"),
+			"best_feature_body_index": best_feature.get("body_index") if best_feature else selected_body.get("body_index"),
+			"best_feature_body_score": best_feature.get("score") if best_feature else selected_body.get("score"),
+			"body_dimension_candidates": [
+				{
+					"body_index": candidate.get("body_index"),
+					"score": candidate.get("score"),
+					"extraction_method": candidate.get("extraction_method"),
+					"segment_count": candidate.get("segment_count"),
+					"dimensions": copy.deepcopy(candidate.get("dimensions") or {}),
+					"feature_counts": copy.deepcopy(candidate.get("feature_counts") or {}),
+				}
+				for candidate in body_candidates[:5]
+			],
+			"od_diameter_candidates": self._summarize_segment_diameters(part_summary, "od_diameter"),
+			"id_diameter_candidates": self._summarize_segment_diameters(part_summary, "id_diameter"),
+		}
+
+	def _summarize_segment_diameters(
+		self,
+		part_summary: Dict[str, Any],
+		field_name: str,
+	) -> List[Dict[str, Any]]:
+		groups: Dict[float, Dict[str, Any]] = {}
+		for segment in (part_summary.get("segments") or []):
+			try:
+				diameter = float(segment.get(field_name) or 0.0)
+			except Exception:
+				continue
+			if diameter <= 0:
+				continue
+			try:
+				z_start = float(segment.get("z_start") or 0.0)
+				z_end = float(segment.get("z_end") or 0.0)
+			except Exception:
+				z_start = 0.0
+				z_end = 0.0
+			span = abs(z_end - z_start)
+			key = round(diameter, 4)
+			entry = groups.setdefault(
+				key,
+				{
+					"diameter_in": diameter,
+					"segment_count": 0,
+					"total_axial_span_in": 0.0,
+					"max_single_span_in": 0.0,
+				},
+			)
+			entry["segment_count"] += 1
+			entry["total_axial_span_in"] += span
+			entry["max_single_span_in"] = max(float(entry["max_single_span_in"]), span)
+
+		return sorted(
+			groups.values(),
+			key=lambda entry: (
+				float(entry.get("total_axial_span_in") or 0.0),
+				float(entry.get("segment_count") or 0.0),
+				-float(entry.get("diameter_in") or 0.0),
+			),
+			reverse=True,
+		)[:8]
+
 	def _build_deterministic_result(self, step_path: Path, part_summary: Dict[str, Any]) -> Dict[str, Any]:
 		metadata = self._extract_step_metadata(step_path)
 		totals = part_summary.get("totals") or {}
@@ -865,7 +954,7 @@ class StepAnalysisService:
 		validation.update(parsed.get("validation") or {})
 		fields = dict(((fallback.get("validation") or {}).get("fields") or {}))
 		fields.update((parsed.get("validation") or {}).get("fields") or {})
-		validation["fields"] = fields
+		validation["fields"] = self._sync_validation_fields(extracted, fields, fallback)
 		if not validation.get("cross_checks"):
 			validation["cross_checks"] = (fallback.get("validation") or {}).get("cross_checks", [])
 
@@ -878,6 +967,24 @@ class StepAnalysisService:
 		)
 		result["analysis_source"] = "step"
 		return result
+
+	def _sync_validation_fields(
+		self,
+		extracted: Dict[str, Any],
+		fields: Dict[str, Any],
+		fallback: Dict[str, Any],
+	) -> Dict[str, Any]:
+		fallback_fields = ((fallback.get("validation") or {}).get("fields") or {})
+		synced: Dict[str, Any] = dict(fields)
+		for key in ("od_in", "max_od_in", "id_in", "max_id_in", "length_in", "max_length_in"):
+			entry = dict(fallback_fields.get(key) or {})
+			entry.update(synced.get(key) or {})
+			entry["value"] = extracted.get(key)
+			if entry.get("confidence") is None:
+				entry["confidence"] = float((fallback_fields.get(key) or {}).get("confidence") or 0.0)
+			entry["issue"] = entry.get("issue")
+			synced[key] = entry
+		return synced
 
 	def _build_code_issues(self, extracted: Dict[str, Any]) -> list[str]:
 		issues: list[str] = []

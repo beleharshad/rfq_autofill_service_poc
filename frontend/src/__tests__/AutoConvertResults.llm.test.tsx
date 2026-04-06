@@ -27,6 +27,10 @@ vi.mock('../services/api', () => ({
   api: {
     getJobFiles: vi.fn(),
     getJob: vi.fn(),
+    getCorrections: vi.fn(),
+    saveCorrection: vi.fn(),
+    fetchBlobUrl: vi.fn(),
+    fetchJobFile: vi.fn(),
     checkOccAvailability: vi.fn(),
     rfqListExports: vi.fn(),
     getPdfUrl: vi.fn((_jobId: string, path: string) => `/mocked/${path}`),
@@ -79,6 +83,35 @@ const PART_SUMMARY = {
   ],
   scale_report: { method: 'anchor_dimension', validation_passed: true },
   inference_metadata: { overall_confidence: 0.9 },
+};
+
+const STEP_PART_SUMMARY_BBOX = {
+  units: { length: 'in' },
+  z_range: [0, 7.304],
+  segments: [
+    {
+      z_start: 0,
+      z_end: 7.304,
+      od_diameter: 6.892,
+      id_diameter: 0,
+      confidence: 0.7,
+      flags: [],
+    },
+  ],
+  scale_report: { method: 'step_upload_bbox_fallback', validation_passed: false },
+  inference_metadata: {
+    overall_confidence: 0.7,
+    source: 'uploaded_step_selected_body_bbox_fallback',
+    body_count: 3,
+  },
+  selected_body: {
+    analysis_warning: 'Feature extraction produced no turned segments',
+  },
+  body_candidates: [{ body_index: 0 }, { body_index: 1 }, { body_index: 2 }],
+  warnings: ['Detected 3 solid bodies in the STEP file; selected body 0 as the dominant turned candidate.'],
+  step_metadata: {
+    representation_context: 'TOP_LEVEL_ASSEMBLY_PART',
+  },
 };
 
 const LLM_ANALYSIS_ACCEPT = {
@@ -193,6 +226,21 @@ function setupDefaultMocks() {
   });
 
   mockApi.rfqListExports.mockResolvedValue({ files: [] });
+  mockApi.getCorrections.mockResolvedValue({});
+  mockApi.saveCorrection.mockResolvedValue(undefined);
+  mockApi.fetchBlobUrl.mockResolvedValue('blob:http://localhost/mock-page');
+  mockApi.fetchJobFile.mockImplementation(async (_jobId: string, path: string) => {
+    if (path === 'outputs/part_summary.json') {
+      return makeJsonFetchResponse(PART_SUMMARY);
+    }
+    if (path === 'outputs/inferred_stack.json') {
+      return new Response('', { status: 404 });
+    }
+    if (path.endsWith('.pdf')) {
+      return new Response(new Blob(['pdf'], { type: 'application/pdf' }), { status: 200 });
+    }
+    return new Response('', { status: 404 });
+  });
   mockApi.detectViews.mockResolvedValue({ job_id: JOB_ID, pages: [], total_views: 0 });
   mockApi.rfqExportXlsx.mockResolvedValue({
     blob: new Blob(['xlsx content'], { type: 'application/octet-stream' }),
@@ -435,7 +483,7 @@ describe('AutoConvertResults — LLM scenario', () => {
     fireEvent.click(screen.getByRole('button', { name: /auto-detect turned view/i }));
 
     await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /generate excel.*3d view/i });
+      const btn = screen.getByRole('button', { name: /download all/i });
       expect(btn).not.toBeDisabled();
     }, { timeout: 6000 });
   });
@@ -453,11 +501,11 @@ describe('AutoConvertResults — LLM scenario', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /auto-detect turned view/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /generate excel.*3d view/i })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: /download all/i })).not.toBeDisabled(),
       { timeout: 6000 }
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /generate excel.*3d view/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download all/i }));
     await waitFor(() => {
       expect(mockApi.rfqExportXlsx).toHaveBeenCalledOnce();
     }, { timeout: 6000 });
@@ -474,11 +522,11 @@ describe('AutoConvertResults — LLM scenario', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /auto-detect turned view/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /generate excel.*3d view/i })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: /download all/i })).not.toBeDisabled(),
       { timeout: 6000 }
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /generate excel.*3d view/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download all/i }));
     await waitFor(() => {
       expect(mockApi.generateStepFromInferredStack).toHaveBeenCalledWith(JOB_ID);
     }, { timeout: 6000 });
@@ -495,11 +543,11 @@ describe('AutoConvertResults — LLM scenario', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /auto-detect turned view/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /generate excel.*3d view/i })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: /download all/i })).not.toBeDisabled(),
       { timeout: 6000 }
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /generate excel.*3d view/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download all/i }));
     await waitFor(() => {
       const calls = (mockApi.downloadFile as ReturnType<typeof vi.fn>).mock.calls;
       const stepCall = calls.find((c) => String(c[1]).includes('model.step'));
@@ -519,11 +567,11 @@ describe('AutoConvertResults — LLM scenario', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /auto-detect turned view/i }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /generate excel.*3d view/i })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: /download all/i })).not.toBeDisabled(),
       { timeout: 6000 }
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /generate excel.*3d view/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download all/i }));
     await waitFor(() => {
       const calls = (mockApi.downloadFile as ReturnType<typeof vi.fn>).mock.calls;
       const llmCall = calls.find((c) => String(c[1]).includes('llm_analysis.json'));
@@ -571,6 +619,31 @@ describe('AutoConvertResults — LLM scenario', () => {
     await waitFor(() => {
       expect(screen.getByText(/REVIEW\s*·/i)).toBeInTheDocument();
     }, { timeout: 6000 });
+  });
+
+  it('shows REVIEW when a STEP job only has bbox fallback geometry and no llm_analysis', async () => {
+    const mockApi = api as ReturnType<typeof vi.mocked<typeof api>>;
+    mockApi.getJobFiles.mockResolvedValue({
+      files: [
+        { path: 'inputs/model.step', name: 'model.step', size: 1024, created_at: '' },
+        { path: 'outputs/part_summary.json', name: 'part_summary.json', size: 512, created_at: '' },
+      ],
+    });
+    mockApi.fetchJobFile.mockImplementation(async (_jobId: string, path: string) => {
+      if (path === 'outputs/part_summary.json') {
+        return makeJsonFetchResponse(STEP_PART_SUMMARY_BBOX);
+      }
+      return new Response('', { status: 404 });
+    });
+
+    await act(async () => {
+      render(<AutoConvertResults jobId={JOB_ID} />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/REVIEW\s*·/i)).toBeInTheDocument();
+      expect(screen.getByText(/No validated LLM analysis is available for this STEP job yet/i)).toBeInTheDocument();
+    });
   });
 
   // ── 9. Material displayed ───────────────────────────────────────────────
