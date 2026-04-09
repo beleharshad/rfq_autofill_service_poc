@@ -40,9 +40,9 @@ def _get_model_cascade() -> list[str]:
     # Prioritize a known-working model first to avoid cascade blocking.
     # Keep the env-configured model in the list too and de-duplicate below.
     raw = [
-        # Prefer Gemini 2.5 Pro first, then flash variants and the env-configured model.
-        "gemini-2.5-pro",
+        # Prefer Gemini 2.5 Flash first (user request), then 2.5 Pro and env-configured model.
         "gemini-2.5-flash",
+        "gemini-2.5-pro",
         os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash"),
         # Prefer Gemini 3.1 variants and older models next; try Gemini 4 last
         "gemini-3.1-pro",
