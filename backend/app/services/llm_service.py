@@ -344,6 +344,11 @@ def generate_text(
                 _mark_rate_limited(candidate, seconds=120)
             logger.info("[LLM] Falling back from %s to next model in cascade", candidate)
             continue
+        except Exception as exc:
+            # Non-429 errors (network/503/etc) — log and try next candidate.
+            last_error = exc
+            logger.warning("[LLM] Model %s failed with error: %s — falling back", candidate, exc)
+            continue
 
     if last_error:
         raise last_error
