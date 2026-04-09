@@ -34,16 +34,20 @@ def _normalize_model_name(model: str | None) -> str:
 # Model cascade: automatic fallback when daily quota is exhausted
 # ---------------------------------------------------------------------------
 
-# Primary model is whatever GOOGLE_GEMINI_MODEL env var says (default 2.0-flash).
-# When its daily quota is exhausted, fall through the cascade in order.
-_MODEL_CASCADE = [
-    os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash"),
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-]
-# Remove duplicates while preserving order
-_seen: set[str] = set()
-_MODEL_CASCADE = [m for m in _MODEL_CASCADE if not (m in _seen or _seen.add(m))]  # type: ignore[func-returns-value]
+# Primary model cascade. Build at call-time so changes to the
+# `GOOGLE_GEMINI_MODEL` env var are picked up without restarting the process.
+def _get_model_cascade() -> list[str]:
+    raw = [
+        os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash"),
+        # Prefer Gemini 4 if available, then Gemini 3.1 variants, then older models.
+        "gemini-4-26b",
+        "gemini-3.1-pro",
+        "gemini-3.1-flash-lite",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash",
+    ]
+    seen: set[str] = set()
+    return [m for m in raw if not (m in seen or seen.add(m))]
 
 # Epoch-second timestamp after which each model's daily quota resets (0 = not exhausted).
 _model_quota_reset: dict[str, float] = {}
@@ -82,11 +86,12 @@ def _mark_rate_limited(model_raw: str, seconds: float = 120) -> None:
 def _get_active_model() -> str:
     """Return the first model in the cascade whose daily quota is not exhausted."""
     now = time.time()
-    for m in _MODEL_CASCADE:
+    cascade = _get_model_cascade()
+    for m in cascade:
         if now >= _model_quota_reset.get(m, 0):
             return m
     # All models exhausted — return last and let it fail with a clear error
-    return _MODEL_CASCADE[-1]
+    return cascade[-1]
 
 
 def _get_base_url() -> str:
@@ -315,7 +320,8 @@ def generate_text(
 
     last_error: Exception | None = None
     attempts = 0  # counts only non-rate-limited calls (quota-consuming attempts)
-    for candidate in _MODEL_CASCADE:
+    cascade = _get_model_cascade()
+    for candidate in cascade:
         if attempts >= max_attempts:
             break
         if time.time() < _model_quota_reset.get(candidate, 0):
@@ -326,7 +332,7 @@ def generate_text(
                 prompt, candidate, temperature, max_output_tokens, timeout, fast_fail=True
             )
             attempts += 1  # only count after a real (non-429) request
-            if candidate != _MODEL_CASCADE[0]:
+            if candidate != cascade[0]:
                 logger.info("[LLM] Successfully used fallback model: %s", candidate)
             return result
         except RateLimitError as exc:
@@ -425,7 +431,8 @@ def generate_with_image(
     # No explicit model — cascade, capped at max_attempts models
     cascade_last_err: Exception | None = None
     cascade_attempts = 0  # counts only non-rate-limited calls (quota-consuming attempts)
-    for candidate in _MODEL_CASCADE:
+    cascade = _get_model_cascade()
+    for candidate in cascade:
         if cascade_attempts >= max_attempts:
             break
         if time.time() < _model_quota_reset.get(candidate, 0):
@@ -445,7 +452,7 @@ def generate_with_image(
                     data = _post_json(url, payload, timeout, fast_fail=True)
                     text = _extract_text(data).strip()
                     if text:
-                        if candidate != _MODEL_CASCADE[0]:
+                        if candidate != cascade[0]:
                             logger.info("[LLM] Vision: successfully used fallback model: %s", candidate)
                         cascade_attempts += 1  # only count after a real (non-429) request
                         return text
