@@ -37,13 +37,15 @@ def _normalize_model_name(model: str | None) -> str:
 # Primary model cascade. Build at call-time so changes to the
 # `GOOGLE_GEMINI_MODEL` env var are picked up without restarting the process.
 def _get_model_cascade() -> list[str]:
+    # Prioritize a known-working model first to avoid cascade blocking.
+    # Keep the env-configured model in the list too and de-duplicate below.
     raw = [
+        "gemini-2.5-flash",
         os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash"),
-        # Prefer Gemini 3.1 variants and older models first; try Gemini 4 last
+        # Prefer Gemini 3.1 variants and older models next; try Gemini 4 last
         "gemini-3.1-pro",
         "gemini-3.1-flash-lite",
         "gemini-2.0-flash-lite",
-        "gemini-2.5-flash",
         "gemini-4-26b",
     ]
     seen: set[str] = set()
