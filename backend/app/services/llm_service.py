@@ -39,12 +39,12 @@ def _normalize_model_name(model: str | None) -> str:
 def _get_model_cascade() -> list[str]:
     raw = [
         os.getenv("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash"),
-        # Prefer Gemini 4 if available, then Gemini 3.1 variants, then older models.
-        "gemini-4-26b",
+        # Prefer Gemini 3.1 variants and older models first; try Gemini 4 last
         "gemini-3.1-pro",
         "gemini-3.1-flash-lite",
         "gemini-2.0-flash-lite",
         "gemini-2.5-flash",
+        "gemini-4-26b",
     ]
     seen: set[str] = set()
     return [m for m in raw if not (m in seen or seen.add(m))]
