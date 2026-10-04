@@ -1,5 +1,6 @@
 /**API client for backend communication.*/
 import type { PartSpec } from './partSpec';
+import type { DocumentAssociation, DocumentRegistry } from './documentRegistry';
 
 import {
   JobResponse,
@@ -79,6 +80,18 @@ async function handleBlobResponse(response: Response): Promise<{ blob: Blob; fil
 }
 
 export const api = {
+  async registerDocuments(jobId: string): Promise<DocumentRegistry> {
+    return handleResponse<DocumentRegistry>(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/register`, { method: 'POST' }));
+  },
+  async getDocuments(jobId: string): Promise<DocumentRegistry> {
+    return handleResponse<DocumentRegistry>(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents`));
+  },
+  async associateDocument(jobId: string, documentId: string, association: DocumentAssociation, expectedVersion: number): Promise<{ version: number; document_id: string }> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/${encodeURIComponent(documentId)}/association`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...association, expected_version: expectedVersion }),
+    }));
+  },
   async getPartSpec(jobId: string, signal?: AbortSignal): Promise<PartSpec> {
     const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/part-spec`, { signal });
     return handleResponse<PartSpec>(response);

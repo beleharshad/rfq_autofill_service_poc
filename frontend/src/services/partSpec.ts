@@ -1,4 +1,5 @@
 /** v0.1 legacy bridge: candidate values cannot authorize geometry or quoting. */
+import type { DocumentAssociation } from './documentRegistry';
 export interface PartSpec {
   schema_version: '0.1';
   adapter_version: 'legacy-summary-v1';
@@ -8,8 +9,9 @@ export interface PartSpec {
   manufacturing_state: 'unresolved';
   selected_body_ids: string[];
   snapshot_id: string;
+  registry_version: number;
   sources: { document_id: string; path: string; sha256: string;
-    role: 'unclassified' | 'legacy_summary'; revision: string | null }[];
+    role: 'unclassified' | 'legacy_summary'; revision: string | null; association: DocumentAssociation | null }[];
   dimensions: { name: 'maximum_outer_diameter' | 'axial_length'; value: number;
     unit: 'mm'; source_value: number; source_unit: 'in' | 'mm';
     meaning: 'legacy_model_extent'; acceptance: 'unverified';

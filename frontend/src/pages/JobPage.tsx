@@ -5,6 +5,7 @@ import ResultsView from '../components/ResultsView/ResultsView';
 import LogsView from '../components/LogsView/LogsView';
 import AutoConvertResults from '../components/AutoConvertResults/AutoConvertResults';
 import PartSpecPanel from '../components/PartSpecPanel';
+import DocumentRegistryPanel from '../components/DocumentRegistryPanel';
 import type { JobResponse } from '../services/types';
 import './JobPage.css';
 
@@ -14,6 +15,7 @@ function JobPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [verificationVersion, setVerificationVersion] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -58,7 +60,10 @@ function JobPage() {
         </div>
       ) : (
         <div className="job-main">
-          {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <PartSpecPanel key={id} jobId={id} />}
+          {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <>
+            <DocumentRegistryPanel key={id} jobId={id} onChanged={() => setVerificationVersion(v => v + 1)} />
+            <PartSpecPanel key={`${id}:${verificationVersion}`} jobId={id} />
+          </>}
           {job.mode === 'auto_convert' && id ? (
             <AutoConvertResults
               jobId={id}

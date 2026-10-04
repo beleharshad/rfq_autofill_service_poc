@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.models.document_registry import DocumentAssociation
 
 
 class ContractModel(BaseModel):
@@ -15,6 +16,7 @@ class SourceDocument(ContractModel):
     sha256: str
     role: Literal["unclassified", "legacy_summary"] = "unclassified"
     revision: str | None = None
+    association: DocumentAssociation | None = None
 
 
 class Evidence(ContractModel):
@@ -57,6 +59,7 @@ class PartSpec(ContractModel):
     selected_body_ids: list[str] = Field(default_factory=list)
     # Content identity of this response, not a persisted correction-history version.
     snapshot_id: str = ""
+    registry_version: int = 0
     sources: list[SourceDocument] = Field(default_factory=list)
     dimensions: list[DimensionCandidate] = Field(default_factory=list)
     readiness: Readiness = Field(default_factory=Readiness)

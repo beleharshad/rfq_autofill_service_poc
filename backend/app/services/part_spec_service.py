@@ -12,6 +12,8 @@ from fastapi import HTTPException
 
 from app.models.part_spec import DimensionCandidate, Evidence, PartSpec, ReviewIssue, SourceDocument
 from app.storage.file_storage import FileStorage
+from app.storage.document_registry import DocumentRegistry
+from app.models.document_registry import DocumentAssociation
 
 
 def _positive_number(value):
@@ -126,6 +128,33 @@ class PartSpecService:
                                           sha256=content_hash,
                                           role="legacy_summary" if is_summary else "unclassified"))
         spec = adapt_legacy_summary(job_id, summary, sources)
+        registry = DocumentRegistry(self.files.get_job_path(job_id)).read()
+        spec.registry_version = registry["version"]
+        registered = {d["document_id"]: d for d in registry["documents"]}
+        registered_paths = {d["path"] for d in registry["documents"]}
+        changed_source = False
+        for source in spec.sources:
+            entry = registered.get(source.document_id)
+            if entry:
+                source.association = DocumentAssociation(**entry["association"]) if entry["association"] else None
+                if source.association:
+                    source.revision = source.association.revision
+            elif source.path in registered_paths:
+                changed_source = True
+        if changed_source:
+            spec.issues.append(ReviewIssue(code="source_content_changed",
+                message="An input differs from its retained original. Register and review the new source before using its associations."))
+        associations = [d["association"] for d in registry["documents"] if d["association"]]
+        revisions = {}
+        for association in associations:
+            if association["role"] != "quote" and association["revision"] is not None:
+                revisions.setdefault(association["part_number"], set()).add(association["revision"])
+        if any(len(values) > 1 for values in revisions.values()):
+            spec.issues.append(ReviewIssue(code="revision_conflict",
+                message="Registered sources for the same part have different revisions. Select governing evidence before reconstruction."))
+        if associations:
+            spec.issues.append(ReviewIssue(code="summary_association_unverified",
+                message="Source associations are recorded; the legacy model has not yet been linked to a selected source and revision."))
         if parse_issue:
             spec.issues.append(ReviewIssue(code="invalid_summary", message=parse_issue))
         if len([s for s in sources if s.role == "unclassified"]) > 1:

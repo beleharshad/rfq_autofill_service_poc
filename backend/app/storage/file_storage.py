@@ -3,11 +3,13 @@
 import os
 import zipfile
 import shutil
+import io
 from pathlib import Path
 from typing import List, Tuple
 from fastapi import UploadFile, HTTPException
 
 from app.storage.paths import jobs_root, legacy_jobs_roots
+from app.storage.document_registry import DocumentRegistry
 
 
 class FileStorage:
@@ -54,16 +56,7 @@ class FileStorage:
         Returns:
             Relative path to saved file
         """
-        self.ensure_job_directories(job_id)
-        inputs_path = self.get_inputs_path(job_id)
-
-        safe_filename = self._sanitize_filename(file.filename)
-        file_path = inputs_path / safe_filename
-
-        with open(file_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        return f"inputs/{safe_filename}"
+        return self._save_stream(job_id, file.filename or "file", file.file)
 
     def save_bytes_file(self, job_id: str, filename: str, content: bytes) -> str:
         """Save raw bytes as an input file for a job.
@@ -71,21 +64,30 @@ class FileStorage:
         Returns:
             Relative path to saved file
         """
+        return self._save_stream(job_id, filename, io.BytesIO(content))
+
+    def _save_stream(self, job_id: str, filename: str, source) -> str:
         self.ensure_job_directories(job_id)
-        inputs_path = self.get_inputs_path(job_id)
-
-        safe_filename = self._sanitize_filename(filename)
-        file_path = inputs_path / safe_filename
-
-        counter = 1
-        base_name = file_path.stem
-        ext = file_path.suffix
-        while file_path.exists():
-            file_path = inputs_path / f"{base_name}_{counter}{ext}"
-            counter += 1
-
-        file_path.write_bytes(content)
-        return f"inputs/{file_path.name}"
+        inputs = self.get_inputs_path(job_id)
+        safe_name = self._sanitize_filename(filename)
+        stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+        counter = 0
+        while True:
+            path = inputs / (safe_name if counter == 0 else f"{stem}_{counter}{suffix}")
+            try:
+                target = path.open("xb")
+                break
+            except FileExistsError:
+                counter += 1
+        try:
+            with target:
+                shutil.copyfileobj(source, target)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        relative_path = f"inputs/{path.name}"
+        DocumentRegistry(self.get_job_path(job_id)).register(path, relative_path, filename)
+        return relative_path
 
     def extract_zip(self, job_id: str, zip_path: Path) -> List[str]:
         """Extract supported CAD/doc files from a ZIP archive.
@@ -110,19 +112,10 @@ class FileStorage:
                     if safe_ext not in allowed_exts:
                         continue
 
-                    extracted_path = inputs_path / safe_filename
-
-                    counter = 1
-                    base_name = extracted_path.stem
-                    ext = extracted_path.suffix
-                    while extracted_path.exists():
-                        extracted_path = inputs_path / f"{base_name}_{counter}{ext}"
-                        counter += 1
-
-                    with zip_ref.open(member) as source, open(extracted_path, "wb") as target:
-                        shutil.copyfileobj(source, target)
-
-                    extracted_files.append(f"inputs/{extracted_path.name}")
+                    if safe_filename.startswith("~$"):
+                        continue
+                    with zip_ref.open(member) as source:
+                        extracted_files.append(self._save_stream(job_id, member, source))
 
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid ZIP file")
@@ -218,7 +211,6 @@ class FileStorage:
                 return False
 
         return True
-
 
 
 
