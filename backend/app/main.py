@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.api import health, jobs, profiles, pipeline, profile2d, pdf, manual, step_generation, rfq, envelope, llm, llm_pdf, preview3d
 from app.security import require_api_key, check_rate_limit
+from app.api import part_spec
 from app.storage.paths import jobs_root, legacy_jobs_roots
 
 # In production (PRODUCTION=true) disable the interactive Swagger/ReDoc UIs so
@@ -91,6 +92,7 @@ _auth = [Depends(require_api_key)]
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])  # public – no auth
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"], dependencies=_auth)
+app.include_router(part_spec.router, prefix="/api/v1/jobs", tags=["part-spec"], dependencies=_auth)
 app.include_router(profiles.router, prefix="/api/v1", tags=["profiles"], dependencies=_auth)
 app.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"], dependencies=_auth)
 app.include_router(profile2d.router, prefix="/api/v1", tags=["profile2d"], dependencies=_auth)
@@ -165,4 +167,3 @@ async def _clear_stuck_pending_stubs() -> None:
 async def root():
     """Root endpoint."""
     return {"message": "RFQ 3D View API", "version": "0.1.0"}
-

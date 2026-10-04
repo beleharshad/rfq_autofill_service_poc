@@ -1,4 +1,5 @@
 /**API client for backend communication.*/
+import type { PartSpec } from './partSpec';
 
 import {
   JobResponse,
@@ -78,6 +79,10 @@ async function handleBlobResponse(response: Response): Promise<{ blob: Blob; fil
 }
 
 export const api = {
+  async getPartSpec(jobId: string, signal?: AbortSignal): Promise<PartSpec> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/part-spec`, { signal });
+    return handleResponse<PartSpec>(response);
+  },
   /**
    * Create a new job with file uploads.
    */
@@ -988,4 +993,3 @@ export const api = {
     return `${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/3d-preview${qs ? `?${qs}` : ''}`;
   },
 };
-

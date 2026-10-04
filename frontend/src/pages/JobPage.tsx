@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import ResultsView from '../components/ResultsView/ResultsView';
 import LogsView from '../components/LogsView/LogsView';
 import AutoConvertResults from '../components/AutoConvertResults/AutoConvertResults';
+import PartSpecPanel from '../components/PartSpecPanel';
 import type { JobResponse } from '../services/types';
 import './JobPage.css';
 
@@ -57,6 +58,7 @@ function JobPage() {
         </div>
       ) : (
         <div className="job-main">
+          {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <PartSpecPanel key={id} jobId={id} />}
           {job.mode === 'auto_convert' && id ? (
             <AutoConvertResults
               jobId={id}
