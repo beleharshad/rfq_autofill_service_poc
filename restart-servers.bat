@@ -13,14 +13,24 @@ if defined RFQ_BACKEND_PYTHON (
     if exist "%RFQ_ROOT%backend\.venv\Scripts\python.exe" set "RFQ_PYTHON=%RFQ_ROOT%backend\.venv\Scripts\python.exe"
 )
 
+rem Optional override: set RFQ_NPM=C:\Program Files\nodejs\npm.cmd
+if not defined RFQ_NPM (
+    for %%I in (npm.cmd) do set "RFQ_NPM=%%~$PATH:I"
+)
+if not defined RFQ_NPM if exist "%ProgramFiles%\nodejs\npm.cmd" set "RFQ_NPM=%ProgramFiles%\nodejs\npm.cmd"
+if not defined RFQ_NPM if defined ProgramFiles(x86) if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" set "RFQ_NPM=%ProgramFiles(x86)%\nodejs\npm.cmd"
+if not defined RFQ_NPM if exist "%LocalAppData%\Volta\bin\npm.cmd" set "RFQ_NPM=%LocalAppData%\Volta\bin\npm.cmd"
+if not defined RFQ_NPM if exist "%AppData%\nvm\npm.cmd" set "RFQ_NPM=%AppData%\nvm\npm.cmd"
+
 if /I "%~1"=="--backend" goto backend
 if /I "%~1"=="--frontend" goto frontend
 
 if not exist "%RFQ_ROOT%backend\app\main.py" goto wrong_folder
 if not exist "%RFQ_ROOT%frontend\package.json" goto wrong_folder
-where npm.cmd >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: npm is missing. Install Node.js and reopen this window.
+if not defined RFQ_NPM (
+    echo ERROR: npm was not found.
+    echo Install Node.js LTS from https://nodejs.org, then close and reopen PowerShell.
+    echo If Node.js is already installed, set RFQ_NPM to the full path of npm.cmd and run this file again.
     goto failed
 )
 if not exist "%RFQ_ROOT%frontend\node_modules\vite\bin\vite.js" (
@@ -54,7 +64,7 @@ exit /b %errorlevel%
 
 :frontend
 cd /d "%RFQ_ROOT%frontend"
-call npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
+call "%RFQ_NPM%" run dev -- --host 127.0.0.1 --port 5173 --strictPort
 exit /b %errorlevel%
 
 :wrong_folder
