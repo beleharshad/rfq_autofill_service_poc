@@ -6,6 +6,7 @@ import LogsView from '../components/LogsView/LogsView';
 import AutoConvertResults from '../components/AutoConvertResults/AutoConvertResults';
 import PartSpecPanel from '../components/PartSpecPanel';
 import DocumentRegistryPanel from '../components/DocumentRegistryPanel';
+import AcceptedPartPanel from '../components/AcceptedPartPanel';
 import type { JobResponse } from '../services/types';
 import './JobPage.css';
 
@@ -63,6 +64,7 @@ function JobPage() {
           {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <>
             <DocumentRegistryPanel key={id} jobId={id} onChanged={() => setVerificationVersion(v => v + 1)} />
             <PartSpecPanel key={`${id}:${verificationVersion}`} jobId={id} />
+            <AcceptedPartPanel key={`accepted:${id}:${verificationVersion}`} jobId={id} />
           </>}
           {job.mode === 'auto_convert' && id ? (
             <AutoConvertResults

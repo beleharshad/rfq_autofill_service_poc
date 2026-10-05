@@ -1,6 +1,7 @@
 /**API client for backend communication.*/
 import type { PartSpec } from './partSpec';
 import type { DocumentAssociation, DocumentRegistry } from './documentRegistry';
+import type { AcceptedPart, GeometryBuild, Recipe, SourceAnalysis } from './acceptedParts';
 
 import {
   JobResponse,
@@ -60,7 +61,8 @@ const fetch = _fetch;
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+    const detail = Array.isArray(error.detail) ? error.detail.map((item: { loc?: string[]; msg?: string }) => `${item.loc?.join('.')}: ${item.msg}`).join('; ') : error.detail;
+    throw new Error(typeof detail === 'string' ? detail : `HTTP error! status: ${response.status}`);
   }
   return response.json();
 }
@@ -80,6 +82,38 @@ async function handleBlobResponse(response: Response): Promise<{ blob: Blob; fil
 }
 
 export const api = {
+  async analyzeRegisteredSource(jobId: string, documentId: string): Promise<SourceAnalysis> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/${encodeURIComponent(documentId)}/analyze`, { method: 'POST' }));
+  },
+  async getSourceOriginal(jobId: string, documentId: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/${encodeURIComponent(documentId)}/original`);
+    return (await handleBlobResponse(response)).blob;
+  },
+  async getGeometryBuilds(jobId: string, specId: string): Promise<GeometryBuild[]> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/accepted-parts/${encodeURIComponent(specId)}/builds`));
+  },
+  async getAcceptedParts(jobId: string): Promise<AcceptedPart[]> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/accepted-parts`));
+  },
+  async acceptPart(jobId: string, recipe: Recipe, expectedVersion: number, registryVersion: number): Promise<AcceptedPart> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/accepted-parts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...recipe, expected_version: expectedVersion, expected_registry_version: registryVersion }),
+    }));
+  },
+  async buildAcceptedPart(jobId: string, specId: string): Promise<GeometryBuild> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/accepted-parts/${encodeURIComponent(specId)}/build`, { method: 'POST' }));
+  },
+  async getGeometryBuild(jobId: string, buildId: string): Promise<GeometryBuild> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/geometry-builds/${encodeURIComponent(buildId)}`));
+  },
+  async cancelGeometryBuild(jobId: string, buildId: string): Promise<GeometryBuild> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/geometry-builds/${encodeURIComponent(buildId)}`, { method: 'DELETE' }));
+  },
+  async getGeometryArtifact(jobId: string, buildId: string, filename: string, signal?: AbortSignal): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/geometry-builds/${encodeURIComponent(buildId)}/artifacts/${encodeURIComponent(filename)}`, { signal });
+    return (await handleBlobResponse(response)).blob;
+  },
   async registerDocuments(jobId: string): Promise<DocumentRegistry> {
     return handleResponse<DocumentRegistry>(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/register`, { method: 'POST' }));
   },

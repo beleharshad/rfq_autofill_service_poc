@@ -1,0 +1,40 @@
+name: Generic geometry regression
+on:
+  push:
+    branches: [master, 'feature/generic-partspec-foundation']
+  pull_request:
+    paths: ['backend/**', 'frontend/**', '.github/workflows/generic-geometry.yml']
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements-geometry.txt
+      - run: pip install -r backend/requirements-geometry.txt pytest==7.4.3 httpx==0.25.2 python-multipart
+      - run: python -m pytest tests/test_part_spec.py tests/test_document_registry.py tests/test_accepted_parts.py tests/test_generic_workflow.py tests/test_source_analysis.py -q
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: frontend
+      - run: npm run test:run
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+        env:
+          VITE_ENABLE_PART_SPEC: 'true'

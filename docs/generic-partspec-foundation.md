@@ -115,5 +115,10 @@ Document association does not select a governing revision, bind a legacy model t
 source, approve dimensions, or rebuild CAD/RFQ artifacts. Those outputs remain unverified.
 Full accepted corrections and downstream artifact invalidation are the next slice.
 
+That next slice is now implemented for the source-reviewed geometry path. See
+[generic-geometry-workflow.md](generic-geometry-workflow.md) for source-specific
+extraction, accepted recipe versions, CAD worker, viewer, export integration,
+installation and remaining capability limits. Legacy RFQ outputs remain separate.
+
 Additional checks: `python -m pytest tests/test_part_spec.py tests/test_document_registry.py`
 from backend; `npm run test:run` and `npm run build` from frontend.
