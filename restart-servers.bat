@@ -5,6 +5,8 @@ set "RFQ_ROOT=%~dp0"
 rem Optional override: set RFQ_BACKEND_PYTHON=C:\path\to\python.exe
 if defined RFQ_BACKEND_PYTHON (
     set "RFQ_PYTHON=%RFQ_BACKEND_PYTHON%"
+) else if defined CONDA_PREFIX if exist "%CONDA_PREFIX%\python.exe" (
+    set "RFQ_PYTHON=%CONDA_PREFIX%\python.exe"
 ) else (
     set "RFQ_PYTHON=python"
     if exist "%RFQ_ROOT%venv\Scripts\python.exe" set "RFQ_PYTHON=%RFQ_ROOT%venv\Scripts\python.exe"
