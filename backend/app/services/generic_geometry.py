@@ -155,6 +155,14 @@ def build_geometry(spec, registry, output: Path):
                     "minimum_coaxial_through_bore_mm": through_id, "coaxial_bore_stations": bore_stations,
                     "volume_mm3": shape.Volume(), "frame": "accepted source XYZ; axial direction Z",
                     "method": "BRepBndLib.AddOptimal without triangulation; outward coaxial cylinder surfaces for OD"}
+    for check in recipe.dimension_checks:
+        value = measurements.get(check['metric'])
+        if value is None or not check['lower']-1e-5 <= value <= check['upper']+1e-5:
+            raise ValueError(f"Drawing dimension check failed: {check['metric']} measured {value}, expected [{check['lower']}, {check['upper']}]")
+    if recipe.acceptance_origin != 'human_review':
+        warnings.append('Automatically constructed; no human engineering review or thread fit certification')
+    if recipe.acceptance_origin == 'source_cad':
+        warnings.append('Source CAD identity and manufacturing state are not independently verified; XYZ frame is retained')
     output.mkdir(parents=True, exist_ok=True)
     cq.exporters.export(shape, str(output / "model.step"))
     vertices, triangles = shape.tessellate(0.02, 0.1)
@@ -162,7 +170,8 @@ def build_geometry(spec, registry, output: Path):
     mesh.export(str(output / "model.glb"))  # glTF metres; measurement values above remain mm.
     manifest = {"spec_id": spec["spec_id"], "part_key": spec["part_key"], "version": spec["version"],
                 "registry_version": spec["registry_version"], "engine": f"cadquery-{cq.__version__}",
-                "status": "constructed_from_reviewed_recipe", "completeness": recipe.completeness,
+                "status": "constructed_from_reviewed_recipe" if recipe.acceptance_origin == "human_review" else "constructed_automatically",
+                "acceptance_origin": recipe.acceptance_origin, "dimension_checks": recipe.dimension_checks, "completeness": recipe.completeness,
                 "independent_drawing_validation": "not_performed", "measurements": measurements,
                 "features": feature_results, "warnings": warnings, "mesh_unit": "m",
                 "mesh_linear_tolerance_mm": 0.02, "quote_status": "dimensions_only"}
@@ -183,7 +192,8 @@ def export_review_workbook(path, spec, manifest):
     for row in [("Field", "Value", "Unit / meaning"), ("Part number", p["part_number"], "Reviewed identity"),
                 ("Revision", p["revision"], "Governing source revision"),
                 ("Specification", spec["spec_id"], "Versioned specification ID"),
-                ("Completeness", p["completeness"], "Reviewer declaration"),
+                ("Completeness", p["completeness"], "Recipe declaration"),
+                ("Acceptance origin", p.get("acceptance_origin", "human_review"), "Automatic does not imply human review"),
                 ("Material", p.get("material"), "Reviewed text; pricing not calculated")]:
         sheet.append(row)
     for key, value in manifest["measurements"].items():
@@ -196,7 +206,7 @@ def export_review_workbook(path, spec, manifest):
     for evidence in p["evidence"]:
         notes.append((evidence["document_id"], evidence.get("page"), evidence["locator"]))
     notes.append(("Review note", p["review_note"]))
-    notes.append(("Validation", "Constructed from reviewed recipe; independent drawing validation not performed"))
+    notes.append(("Validation", "Constructed from versioned recipe; independent engineering validation not performed"))
     for warning in manifest["warnings"]:
         notes.append(("Limitation", warning))
     notes.append(("Costing", "No price, material density or manufacturing allowance inferred"))

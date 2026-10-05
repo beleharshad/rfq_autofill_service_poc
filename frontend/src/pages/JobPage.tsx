@@ -7,6 +7,7 @@ import AutoConvertResults from '../components/AutoConvertResults/AutoConvertResu
 import PartSpecPanel from '../components/PartSpecPanel';
 import DocumentRegistryPanel from '../components/DocumentRegistryPanel';
 import AcceptedPartPanel from '../components/AcceptedPartPanel';
+import AutomaticWorkflowPanel from '../components/AutomaticWorkflowPanel';
 import type { JobResponse } from '../services/types';
 import './JobPage.css';
 
@@ -62,15 +63,18 @@ function JobPage() {
       ) : (
         <div className="job-main">
           {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <>
+            <AutomaticWorkflowPanel jobId={id} />
+            <details><summary>Review sources and correct geometry</summary>
             <DocumentRegistryPanel key={id} jobId={id} onChanged={() => setVerificationVersion(v => v + 1)} />
             <PartSpecPanel key={`${id}:${verificationVersion}`} jobId={id} />
             <AcceptedPartPanel key={`accepted:${id}:${verificationVersion}`} jobId={id} />
+            </details>
           </>}
-          {job.mode === 'auto_convert' && id ? (
+          {job.mode === 'auto_convert' && id ? (import.meta.env.VITE_ENABLE_PART_SPEC === 'true' ? null : (
             <AutoConvertResults
               jobId={id}
             />
-          ) : id ? (
+          )) : id ? (
             <ResultsView
               jobId={id}
               job={job}

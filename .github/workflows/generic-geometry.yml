@@ -18,7 +18,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-geometry.txt
       - run: pip install -r backend/requirements-geometry.txt pytest==7.4.3 httpx==0.25.2 python-multipart
-      - run: python -m pytest tests/test_part_spec.py tests/test_document_registry.py tests/test_accepted_parts.py tests/test_generic_workflow.py tests/test_source_analysis.py -q
+      - run: python -m pytest tests/test_part_spec.py tests/test_document_registry.py tests/test_accepted_parts.py tests/test_generic_workflow.py tests/test_source_analysis.py tests/test_automatic_workflow.py -q
         working-directory: backend
   frontend:
     runs-on: ubuntu-22.04

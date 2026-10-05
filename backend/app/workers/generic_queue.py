@@ -5,11 +5,25 @@ from pathlib import Path
 from app.storage.paths import jobs_root
 from app.storage.accepted_parts import AcceptedParts
 from app.services.generic_build_runner import run_build
+from app.services.automatic_runner import run_automatic
+from app.storage.automatic_runs import AutomaticRuns
 
 
 def drain(root: Path):
     for database in sorted(root.glob("*/source_registry/registry.sqlite3")):
+        automatic = AutomaticRuns(database.parent.parent)
+        conn = automatic.connect()
+        try:
+            with conn:
+                conn.execute("UPDATE automatic_runs SET status='failed',error='Interrupted automatic worker; retry required' WHERE status='running' AND heartbeat<?", (time.time()-90,))
+            queued_auto = conn.execute("SELECT run_id FROM automatic_runs WHERE status='queued' ORDER BY rowid").fetchall()
+        finally:
+            conn.close()
+        for row in queued_auto:
+            run_automatic(automatic.job_path, row['run_id'])
         store = AcceptedParts(database.parent.parent)
+        if (automatic.get() or {}).get("status") == "running":
+            continue
         conn = store.connect()
         try:
             with conn:

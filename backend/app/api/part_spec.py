@@ -17,7 +17,35 @@ from app.storage.accepted_parts import AcceptedParts
 from app.services.generic_build_runner import run_build
 from app.services.source_analysis import analyze_source
 
+from app.storage.automatic_runs import AutomaticRuns
+from app.services.automatic_runner import run_automatic
+
 router = APIRouter()
+
+
+@router.post("/{job_id}/automatic", status_code=202)
+def start_automatic(job_id: str, background: BackgroundTasks, retry: bool = False):
+    files, _ = _registry(job_id)
+    path = files.get_job_path(job_id)
+    run = AutomaticRuns(path).enqueue(retry=retry)
+    if os.getenv("GENERIC_GEOMETRY_QUEUE_ONLY", "").lower() != "true" and run['status'] == 'queued':
+        background.add_task(run_automatic, path, run['run_id'])
+    return run
+
+
+@router.get("/{job_id}/automatic")
+def automatic_status(job_id: str):
+    files, _ = _registry(job_id)
+    return AutomaticRuns(files.get_job_path(job_id)).get()
+
+
+@router.delete("/{job_id}/automatic/{run_id}")
+def stop_automatic(job_id: str, run_id: str):
+    files, _ = _registry(job_id)
+    store = AutomaticRuns(files.get_job_path(job_id))
+    store.cancel(run_id)
+    return store.get(run_id)
+
 
 
 @router.post("/{job_id}/documents/{document_id}/analyze")

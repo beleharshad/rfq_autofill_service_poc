@@ -44,7 +44,9 @@ class AcceptedParts:
                     if not (self.registry.root / "blobs" / row["sha256"]).is_file():
                         raise HTTPException(409, "Retained source is unavailable.")
                     if doc_id == request.governing_document_id:
-                        if association["role"] not in ("finished_drawing", "cad") or association["manufacturing_state"] != "finished":
+                        source_cad = (request.acceptance_origin == "source_cad" and request.base.kind == "step"
+                                      and association["role"] == "cad" and association["manufacturing_state"] == "unresolved")
+                        if not source_cad and (association["role"] not in ("finished_drawing", "cad") or association["manufacturing_state"] != "finished"):
                             raise HTTPException(422, "Select a finished drawing or finished CAD as the governing source.")
                         if request.base.kind == "step" and not row["path"].lower().endswith((".step", ".stp")):
                             raise HTTPException(422, "STEP import requires a registered STEP source.")

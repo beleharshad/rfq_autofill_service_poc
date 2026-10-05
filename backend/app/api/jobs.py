@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 from urllib.parse import urlparse, unquote
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import BackgroundTasks, APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 
 from app.models.job import JobResponse, JobModeRequest
@@ -74,6 +74,8 @@ def _validate_source_url(source_url: str) -> None:
 
 @router.post("", response_model=JobResponse, status_code=201)
 async def create_job(
+    background: BackgroundTasks,
+    automatic_geometry: bool = Form(False),
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     mode: Optional[str] = Form(None),
@@ -137,6 +139,14 @@ async def create_job(
                     detail="Remote URL upload did not produce any accepted source files.",
                 )
 
+        if automatic_geometry and mode == 'auto_convert':
+            import os
+            from app.storage.automatic_runs import AutomaticRuns
+            from app.services.automatic_runner import run_automatic
+            path = job_service.file_storage.get_job_path(job_id)
+            run = AutomaticRuns(path).enqueue()
+            if os.getenv('GENERIC_GEOMETRY_QUEUE_ONLY', '').lower() != 'true':
+                background.add_task(run_automatic, path, run['run_id'])
         return job
 
     except HTTPException:

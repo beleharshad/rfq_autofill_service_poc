@@ -118,9 +118,20 @@ class AcceptedPartRequest(StrictModel):
     completeness: Literal["complete", "partial"]
     unresolved: list[str] = Field(default_factory=list, max_length=100)
     material: str | None = Field(default=None, max_length=200)
+    acceptance_origin: Literal["human_review", "automatic_drawing", "source_cad"] = "human_review"
+    dimension_checks: list[dict] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def review_is_consistent(self):
+        from app.models.automatic import DimensionCheck
+        for check in self.dimension_checks:
+            parsed = DimensionCheck(**check)
+            if parsed.lower > parsed.upper:
+                raise ValueError("Dimension limits are reversed")
+        if self.acceptance_origin == "source_cad" and self.base.kind != "step":
+            raise ValueError("Source CAD acceptance requires an imported STEP solid")
+        if self.acceptance_origin == "automatic_drawing" and (not self.dimension_checks or self.base.kind == "step"):
+            raise ValueError("Automatic drawings require measured dimension checks and cannot import STEP")
         ids = [f.feature_id for f in self.features]
         if len(ids) != len(set(ids)):
             raise ValueError("Feature IDs must be unique")

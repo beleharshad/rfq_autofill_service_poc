@@ -128,7 +128,7 @@ function NewJobPage() {
           <p className="mode-description">
             {mode === 'assisted_manual'
               ? 'You will manually enter dimensions while viewing the PDF.'
-              : 'The system will attempt to automatically detect and extract dimensions from the PDF or STEP geometry.'}
+              : 'Upload starts automatic interpretation, geometry validation and export. Missing or conflicting drawing details are flagged for review.'}
           </p>
         </div>
         <div className="form-group">

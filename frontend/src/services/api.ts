@@ -1,4 +1,5 @@
 /**API client for backend communication.*/
+import type { AutomaticRun } from './automatic';
 import type { PartSpec } from './partSpec';
 import type { DocumentAssociation, DocumentRegistry } from './documentRegistry';
 import type { AcceptedPart, GeometryBuild, Recipe, SourceAnalysis } from './acceptedParts';
@@ -82,6 +83,15 @@ async function handleBlobResponse(response: Response): Promise<{ blob: Blob; fil
 }
 
 export const api = {
+  async getAutomaticRun(jobId: string): Promise<AutomaticRun | null> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/automatic`));
+  },
+  async startAutomaticRun(jobId: string, retry = false): Promise<AutomaticRun> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/automatic?retry=${retry}`, {method:'POST'}));
+  },
+  async cancelAutomaticRun(jobId: string, runId: string): Promise<AutomaticRun> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/automatic/${encodeURIComponent(runId)}`, {method:'DELETE'}));
+  },
   async analyzeRegisteredSource(jobId: string, documentId: string): Promise<SourceAnalysis> {
     return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/documents/${encodeURIComponent(documentId)}/analyze`, { method: 'POST' }));
   },
@@ -141,6 +151,9 @@ export const api = {
     sourceUrl?: string,
   ): Promise<JobResponse> {
     const formData = new FormData();
+    if (mode === 'auto_convert' && import.meta.env.VITE_ENABLE_PART_SPEC === 'true') {
+      formData.append('automatic_geometry', 'true');
+    }
     
     files.forEach((file) => {
       formData.append('files', file);
