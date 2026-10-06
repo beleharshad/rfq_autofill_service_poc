@@ -738,16 +738,19 @@ export default function LatheViewer({
 }) {
   const typedFeatures = features as Feature[];
   // ── Resolve dimensions ──────────────────────────────────────────────────────
-  const cleanSegs = useMemo(() => segments.filter(s => s.od_diameter >= SEG_MIN_OD), [segments]);
+  const cleanSegs = useMemo(() => segments.filter(s =>
+    Number.isFinite(s.od_diameter) && s.od_diameter >= SEG_MIN_OD &&
+    Number.isFinite(s.z_start) && Number.isFinite(s.z_end) && s.z_end > s.z_start
+  ), [segments]);
   const segMaxOd = cleanSegs.length > 0 ? Math.max(...cleanSegs.map(s => s.od_diameter)) : 0;
   const segMinOd = cleanSegs.length > 0 ? Math.min(...cleanSegs.map(s => s.od_diameter)) : 0;
   const segLen   = cleanSegs.length > 0
     ? Math.max(...cleanSegs.map(s => s.z_end)) - Math.min(...cleanSegs.map(s => s.z_start)) : 0;
 
-  const resolvedMaxOd    = (maxOd        && maxOd        > SEG_MIN_OD) ? maxOd        : (segMaxOd > 0 ? segMaxOd : 1.0);
+  const resolvedMaxOd    = (Number.isFinite(maxOd) && maxOd! > SEG_MIN_OD) ? maxOd! : segMaxOd;
   const resolvedFinishOd = (finishOd     && finishOd     > SEG_MIN_OD) ? finishOd     : (segMinOd > SEG_MIN_OD ? segMinOd : resolvedMaxOd);
   const resolvedBoreId   = (boreDiameter && boreDiameter > 0.01)       ? boreDiameter : 0;
-  const resolvedLen      = (lengthIn     && lengthIn     > 0.001)      ? lengthIn     : (segLen > 0 ? segLen : 1.0);
+  const resolvedLen      = (Number.isFinite(lengthIn) && lengthIn! > 0.001) ? lengthIn! : segLen;
 
   const finishR  = Math.max(resolvedFinishOd / 2, 0.002);
   const maxR     = Math.max(resolvedMaxOd    / 2, finishR);
@@ -890,8 +893,8 @@ export default function LatheViewer({
           </div>
         </>
       ) : (
-        <div style={{ color:'#1F3045', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}>
-          Run Auto-Detect to generate 3D preview
+        <div role="status" style={{ color:'#9aa8b8', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}>
+          3D preview unavailable: valid diameter and length are missing. Retry Auto-Detect after resolving the extraction error.
         </div>
       )}
     </div>
