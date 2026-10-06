@@ -73,6 +73,13 @@ Cylinder and revolve axis is Z, from z=0; box is centered in XY from z=0.
 For revolve give the CLOSED radial r,z profile, including internal contours when needed.
 Feature origin is its entry, axis points into material; depth is along that axis.
 Expand every hole/pocket/thread pattern into individual positioned features with unique IDs.
+For circular patterns read the bolt-circle DIAMETER, count, angular datum and spacing
+from the end view. Calculate each XY centre from radius=bolt_circle_diameter/2.
+If angle or location is ambiguous, report unresolved; do not guess an angle.
+No central bore does NOT mean no holes: off-axis holes must still be constructed.
+Match each thread callout to its own drilled-hole group and entry face. Inventory
+all hole groups before building: large threaded through holes and smaller blind
+threaded holes can coexist. Keep drill diameter distinct from thread major diameter.
 Through holes span the complete local thickness, blind holes retain a bottom.
 Keep finished dimensions separate from raw stock and process allowances.
 Read limit dimensions as intervals, choose the midpoint for nominal geometry.

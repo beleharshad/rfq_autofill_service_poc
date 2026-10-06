@@ -47,6 +47,53 @@ def prepare_run(tmp_path,files=None):
     return storage,path,runs,run
 
 
+def test_positioned_holes_threads_and_blind_bottoms_reach_export(tmp_path):
+    """Controlled retainer-like recipe; tests integration, not drawing interpretation.
+
+    Representative grooves are explicit test inputs, not certified UNC dimensions.
+    This simplified fixture intentionally does not claim to model drawing fillets.
+    """
+    _, path, runs, run = prepare_run(tmp_path)
+    features = []
+    centers = [(17.526, 0), (0, 17.526), (-17.526, 0), (0, -17.526)]
+    for i, (x, y) in enumerate(centers):
+        features.append(dict(kind='hole', feature_id=f'hole{i}', origin=[x,y,0],
+                             axis=[0,0,1], diameter=11.0236, depth=25.4, termination='through'))
+        features.append(dict(kind='thread', feature_id=f'thread{i}', origin=[x,y,0],
+                             axis=[0,0,1], side='internal', major_diameter=12.7,
+                             minor_diameter=11.0236, pitch=25.4/13, length=25.4,
+                             groove_width=.8, callout='Representative 0.500-13 UNC-2B'))
+    for i, x in enumerate([-8,8]):
+        features.append(dict(kind='hole', feature_id=f'blind{i}', origin=[x,0,25.4],
+                             axis=[0,0,-1], diameter=5.2578, depth=16.764, termination='blind'))
+    p = DrawingProposal.model_validate(dict(part_number='POSITIONED-REGRESSION',revision='A',
+        role='finished_drawing', units='mm', complete=True, unresolved=[],
+        base=dict(kind='revolve', profile=[[0,0],[28.3845,0],[28.3845,11.176],
+                   [27.2415,11.176],[27.2415,25.4],[0,25.4]]), features=features,
+        evidence=[dict(target=t,page=1,callout='Explicit synthetic test geometry')
+                  for t in ['base']+[f['feature_id'] for f in features]]))
+    audit = DrawingAudit.model_validate(dict(agrees=True,part_number=p.part_number,revision='A',
+        finished_part=True,all_features_accounted_for=True,issues=[],
+        checked_targets=['base']+[f['feature_id'] for f in features],dimensions=[
+            dict(metric='axial_length_mm',lower=25.399,upper=25.401,page=1,callout='test length'),
+            dict(metric='maximum_outer_cylindrical_diameter_mm',lower=56.768,upper=56.770,page=1,callout='test OD')]))
+    execute(path,run['run_id'],interpreter=lambda source:(p,audit,1))
+    result=runs.get()
+    assert result['status']=='complete',result
+    item=result['result']['items'][0]
+    output=path/'outputs'/'accepted'/item['build_id']
+    solid=cq.importers.importStep(str(output/'model.step')).solids().val()
+    assert solid.isValid()
+    assert solid.isInside((0,0,12.7)) # no central bore
+    for x,y in centers:
+        for z in (.1,12.7,25.3):assert not solid.isInside((x,y,z))
+    for x in (-8,8):
+        assert not solid.isInside((x,0,20))
+        assert solid.isInside((x,0,5)) # actual blind-hole floor
+    assert (output/'model.glb').read_bytes()[:4]==b'glTF'
+    assert sum('representative helical' in w for w in item['warnings'])==4
+
+
 @pytest.mark.parametrize('units',['in','mm'])
 def test_pdf_to_actual_hollow_solid_and_exports(tmp_path,units):
     files,path,runs,run=prepare_run(tmp_path)

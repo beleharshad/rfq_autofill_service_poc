@@ -18,6 +18,7 @@ function JobPage() {
   const [error, setError]     = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [verificationVersion, setVerificationVersion] = useState(0);
+  const [legacyPreview, setLegacyPreview] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -38,6 +39,7 @@ function JobPage() {
   if (loading) return <div className="job-page"><div className="loading">Loading job…</div></div>;
   if (error)   return <div className="job-page"><div className="error">Error: {error}</div></div>;
   if (!job)    return <div className="job-page"><div className="error">Job not found</div></div>;
+  const showCadWorkflow = !legacyPreview && (job.mode === 'auto_convert' || import.meta.env.VITE_ENABLE_PART_SPEC === 'true');
 
   return (
     <div className="job-page job-page--slim">
@@ -47,6 +49,10 @@ function JobPage() {
         <span className={`job-mode-badge job-mode-badge--${job.mode}`}>{job.mode}</span>
         <span className="job-status-chip">{job.status}</span>
         <div className="job-header-actions">
+          {job.mode === 'auto_convert' && <button className="job-tab-btn"
+            onClick={() => setLegacyPreview(v => !v)}>
+            {legacyPreview ? 'Open CAD workflow' : 'Open legacy profile preview'}
+          </button>}
           <button
             className={`job-tab-btn${showLogs ? ' active' : ''}`}
             onClick={() => setShowLogs((v) => !v)}
@@ -62,7 +68,7 @@ function JobPage() {
         </div>
       ) : (
         <div className="job-main">
-          {import.meta.env.VITE_ENABLE_PART_SPEC === 'true' && id && <>
+          {showCadWorkflow && id && <>
             <AutomaticWorkflowPanel jobId={id} />
             <details><summary>Review sources and correct geometry</summary>
             <DocumentRegistryPanel key={id} jobId={id} onChanged={() => setVerificationVersion(v => v + 1)} />
@@ -70,7 +76,7 @@ function JobPage() {
             <AcceptedPartPanel key={`accepted:${id}:${verificationVersion}`} jobId={id} />
             </details>
           </>}
-          {job.mode === 'auto_convert' && id ? (import.meta.env.VITE_ENABLE_PART_SPEC === 'true' ? null : (
+          {job.mode === 'auto_convert' && id ? (showCadWorkflow ? null : (
             <AutoConvertResults
               jobId={id}
             />

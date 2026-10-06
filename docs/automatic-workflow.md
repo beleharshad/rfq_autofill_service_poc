@@ -26,13 +26,23 @@ flowchart TD
 Install `backend/requirements-geometry.txt` in the separate geometry environment. Set
 `GENERIC_GEOMETRY_PYTHON` on the API/dispatcher to that interpreter. Set `GOOGLE_API_KEY`
 in the worker environment and optionally `AUTOMATIC_DRAWING_MODEL` (default
-`gemini-2.5-flash`). Keys are sent in headers, never URLs. Enable
-`VITE_ENABLE_PART_SPEC=true` at frontend build time.
+`gemini-2.5-flash`). Keys are sent in headers, never URLs. Auto Convert jobs now
+open this CAD workflow by default, regardless of `VITE_ENABLE_PART_SPEC`.
+The job header provides an explicit legacy profile preview switch for comparison.
+`VITE_ENABLE_PART_SPEC=true` still enables the review panels for other job modes.
 
 New Auto Convert uploads send `automatic_geometry=true`; the server queues processing.
 Existing jobs have a Process uploaded sources button. Use
 `GENERIC_GEOMETRY_QUEUE_ONLY=true` with `python -m app.workers.generic_queue` for a
 supervised durable dispatcher, or the API background runner for development.
+
+For the bolted-retainer case, use the original PDF in this workflow rather than
+converting the legacy `llm_analysis.json` into a recipe: that scalar schema has no
+reliable XY positions, pattern orientation, or complete thread geometry. Each hole
+and thread must have its own explicit position and evidence. Solid centre means no
+central bore; it does not suppress off-axis holes. Unsupported fillets and unknown
+thread roots remain review items. The positioned-feature integration test uses an
+explicit simplified recipe and is not a live accuracy test of this drawing.
 
 Endpoints: POST/GET `/api/v1/jobs/{job_id}/automatic`; DELETE
 `/api/v1/jobs/{job_id}/automatic/{run_id}`. Explicit retries use `?retry=true`.

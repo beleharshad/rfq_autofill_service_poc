@@ -154,7 +154,7 @@ export const api = {
     sourceUrl?: string,
   ): Promise<JobResponse> {
     const formData = new FormData();
-    if (mode === 'auto_convert' && import.meta.env.VITE_ENABLE_PART_SPEC === 'true') {
+    if (mode === 'auto_convert') {
       formData.append('automatic_geometry', 'true');
     }
     
