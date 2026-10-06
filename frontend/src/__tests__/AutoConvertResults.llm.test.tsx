@@ -24,6 +24,7 @@ import AutoConvertResults from '../components/AutoConvertResults/AutoConvertResu
 
 // Mock the entire api module so no real fetch calls happen.
 vi.mock('../services/api', () => ({
+  API_BASE_URL: '/api/v1',
   api: {
     getJobFiles: vi.fn(),
     getJob: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('../services/api', () => ({
     rfqListExports: vi.fn(),
     getPdfUrl: vi.fn((_jobId: string, path: string) => `/mocked/${path}`),
     autoDetectTurnedView: vi.fn(),
+    reextractGeometry: vi.fn(),
     detectViews: vi.fn(),
     inferStackFromView: vi.fn(),
     uploadPdf: vi.fn(),
@@ -324,6 +326,15 @@ describe('AutoConvertResults — LLM scenario', () => {
   });
 
   // ── 1. Mount ────────────────────────────────────────────────────────────
+  it('re-extracts the current job and disables repeat requests while pending', async () => {
+    vi.mocked(api.reextractGeometry).mockResolvedValue({ pending: true });
+    await act(async () => { render(<AutoConvertResults jobId={JOB_ID} />); });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Re-extract Geometry' }));
+    });
+    expect(api.reextractGeometry).toHaveBeenCalledWith(JOB_ID);
+    expect(screen.getByRole('button', { name: 'Re-extract Geometry' })).toBeDisabled();
+  });
 
   it('renders without crashing', async () => {
     await act(async () => {

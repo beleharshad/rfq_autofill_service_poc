@@ -83,6 +83,9 @@ async function handleBlobResponse(response: Response): Promise<{ blob: Blob; fil
 }
 
 export const api = {
+  async reextractGeometry(jobId: string): Promise<{ pending: boolean }> {
+    return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/rerun_llm`, { method: 'POST' }));
+  },
   async getAutomaticRun(jobId: string): Promise<AutomaticRun | null> {
     return handleResponse(await fetch(`${API_BASE_URL}/jobs/${encodeURIComponent(jobId)}/automatic`));
   },

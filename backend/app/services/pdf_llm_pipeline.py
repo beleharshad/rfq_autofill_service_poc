@@ -10,9 +10,9 @@ Pipeline steps
    applied after the agent call.  Final ``valid`` flag is the AND of the
    agent's ACCEPT recommendation + zero code issues.
 
-Using a single merged call (instead of two sequential agents) means the
-pipeline consumes exactly ONE quota slot per run, which matters on free-tier
-Gemini where the limit is 1 RPM.
+The initial merged request uses one quota slot. An incomplete axial profile
+triggers one additional focused visual recovery request; recovered geometry
+requires review. Provider rate limits may prevent that second request.
 """
 
 from __future__ import annotations
@@ -1987,7 +1987,14 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
     try:
       outputs_dir = pdf_path.parent.parent / "outputs"
       part_summary_file = outputs_dir / "part_summary.json"
-      if part_summary_file.exists():
+      stack_file = outputs_dir / "inferred_stack.json"
+      scale_verified = False
+      if stack_file.exists():
+        report = json.loads(stack_file.read_text(encoding="utf-8-sig")).get("scale_report", {})
+        scale_verified = (report.get("method") not in (None, "dpi_based")
+                          and report.get("validation_passed") is True
+                          and float(report.get("confidence") or 0) >= 0.8)
+      if part_summary_file.exists() and scale_verified:
         try:
           ps_text = part_summary_file.read_text(encoding="utf-8")
           ps = json.loads(ps_text)
@@ -2362,6 +2369,33 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
     except Exception:
       # non-fatal: do not prevent pipeline return
       pass
+
+    # A separate visual request revisits surface classification without anchoring
+    # on the incorrect scalar dimensions. Preserve audit evidence and require review.
+    if not extracted.get("axial_profile") and page_images:
+        from app.services.profile_recovery import recover_profile
+        try:
+            recovered = recover_profile(extracted, page_images,
+                llm_service.generate_with_image, _parse_json_response)
+            if recovered:
+                for field in ("bore_type", "od_in", "id_in", "max_id_in", "length_in", "axial_profile"):
+                    extracted[field] = recovered[field]
+                    validation.setdefault("fields", {})[field] = {
+                        "value": recovered[field], "confidence": 0.6,
+                        "issue": "Recovered from enlarged drawing views; review required."}
+                if recovered["bore_type"] == "solid":
+                    extracted["tolerance_id"] = None
+                    validation.setdefault("fields", {})["tolerance_id"] = {
+                        "value": None, "confidence": 0.6, "issue": "No internal surface in recovered profile."}
+                extracted["profile_evidence"] = recovered["evidence"]
+                validation["cross_checks"] = ["Previous scalar self-checks superseded by profile recovery."] + recovered["evidence"]
+                validation["recommendation"] = "REVIEW"
+                validation["overall_confidence"] = 0.6
+            else:
+                validation.setdefault("cross_checks", []).append("Focused visual recovery could not establish a complete profile.")
+        except Exception as exc:
+            logger.warning("Focused profile recovery failed (%s)", type(exc).__name__)
+            validation.setdefault("cross_checks", []).append("Focused visual recovery unavailable; retry extraction.")
 
     from app.services.turned_profile_validation import validate_turned_profile, require_review_for_issues
     profile_issues = validate_turned_profile(extracted)

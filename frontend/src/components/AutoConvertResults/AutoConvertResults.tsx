@@ -796,6 +796,20 @@ function AutoConvertResults({
         >
           {detecting ? 'Detecting…' : inferring ? 'Inferring…' : 'Auto-Detect Turned View'}
         </button>
+        {!isStepBacked && <button className="acr-detect-btn"
+          disabled={detecting || inferring || llmAnalysis?.pending}
+          onClick={async () => {
+            setDetecting(true);
+            setDetectionError(null);
+            try {
+              await api.reextractGeometry(jobId);
+              setLlmAnalysis({ pending: true });
+            } catch (err) {
+              setDetectionError(err instanceof Error ? err.message : 'Re-extraction failed');
+            } finally {
+              setDetecting(false);
+            }
+          }}>Re-extract Geometry</button>}
       </div>
 
       {detectionError && (
