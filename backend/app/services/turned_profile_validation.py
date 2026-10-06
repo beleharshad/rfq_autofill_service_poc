@@ -10,6 +10,8 @@ def validate_turned_profile(extracted):
         extracted['max_id_in'] = None
     profile = extracted.get('axial_profile')
     if not profile:
+        if 'axial_profile' in extracted:
+            issues.append('Axial profile is missing or empty; geometry cannot be verified.')
         return issues
     try:
         if not isinstance(profile, list):
@@ -24,11 +26,22 @@ def validate_turned_profile(extracted):
                 raise ValueError('invalid or discontinuous profile')
             if solid and bore != 0:
                 raise ValueError('solid classification conflicts with internal profile')
+            if extracted.get('bore_type') == 'through' and bore == 0:
+                raise ValueError('through-bore classification conflicts with a solid interval')
             end = stop
         length = extracted.get('length_in')
-        if not isinstance(length, (int, float)) or abs(end - length) > 0.001:
+        if not isinstance(length, (int, float)) or not math.isfinite(length) or abs(end - length) > 0.001:
             raise ValueError('profile does not match overall length')
     except (ValueError, KeyError, TypeError) as exc:
         extracted['axial_profile'] = []
         issues.append(str(exc))
     return issues
+
+
+def require_review_for_issues(validation, issues):
+    """Keep the UI recommendation consistent with deterministic validation."""
+    if issues:
+        validation['recommendation'] = 'REVIEW'
+        checks = list(validation.get('cross_checks') or [])
+        checks.extend(issue for issue in issues if issue not in checks)
+        validation['cross_checks'] = checks

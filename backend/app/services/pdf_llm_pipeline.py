@@ -2363,7 +2363,7 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
       # non-fatal: do not prevent pipeline return
       pass
 
-    from app.services.turned_profile_validation import validate_turned_profile
+    from app.services.turned_profile_validation import validate_turned_profile, require_review_for_issues
     profile_issues = validate_turned_profile(extracted)
     code_issues = _code_validate(extracted) + profile_issues
     try:
@@ -2399,6 +2399,7 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
     except Exception:
       logger.debug("[Pipeline] suspicious END CAP review guard failed", exc_info=True)
 
+    require_review_for_issues(validation, code_issues)
     llm_recommendation = validation.get("recommendation", "REVIEW")
     valid = (llm_recommendation == "ACCEPT") and (len(code_issues) == 0)
 
