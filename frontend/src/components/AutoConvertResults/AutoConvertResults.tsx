@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, API_BASE_URL } from '../../services/api';
 import type { FileInfo, RFQAutofillRequest, CorrectionsMap } from '../../services/types';
 import LatheViewer from './LatheViewer';
+import { resizeProfile } from './turnedProfile';
 import ThreeJSViewer from '../ResultsView/ThreeJSViewer';
 import { setSegments, type Segment as SegmentStoreType } from '../../state/segmentStore';
 import './AutoConvertResults.css';
@@ -657,41 +658,21 @@ function AutoConvertResults({
   const overallConf    = analysisForDisplay?.validation?.overall_confidence;
   const crossChecks: string[] = analysisForDisplay?.validation?.cross_checks || [];
 
-  // Build lathe segments from overrides or raw segments.
-  // When coming from raw segments, propagate the LLM bore (id_in) so the 3-D profile
-  // is hollow even when inferred_stack.json has id_diameter≈0 for most segments.
-  const llmBore = ed.id_in;                    // always from LLM/overrides
+  // Preserve the complete axial profile; scalar ID values cannot define a bore.
 
   // Features detected by LLM – pre-filter: drop anything below 0.60 confidence or missing a type.
   const llmFeatures = useMemo(() => {
     const raw: any[] = (llmAnalysis?.extracted as any)?.features ?? [];
     return raw.filter((f: any) => typeof f === 'object' && f !== null && ((f.confidence ?? 0) as number) >= 0.60);
   }, [llmAnalysis]);
-  const latheSegs: Segment[] =
-    odOvr !== null || maxOdOvr !== null || idOvr !== null || lenOvr !== null
-      ? [{ z_start: 0, z_end: ed.length_in, od_diameter: ed.max_od_in, id_diameter: ed.id_in }]
-      : llmBore > 0.001 && segments.length > 0
-        ? segments.map((s: any) => ({ ...s, id_diameter: Math.max((s.id_diameter ?? 0) as number, llmBore) }))
-        : segments;
+  const explicitProfile = llmAnalysis?.extracted?.axial_profile;
+  const profileSource = Array.isArray(explicitProfile) ? explicitProfile : segments;
+  const latheSegs: Segment[] = resizeProfile(profileSource,
+    odOvr ?? maxOdOvr ?? llmAnalysis?.extracted?.od_in,
+    lenOvr ?? llmAnalysis?.extracted?.length_in,
+    llmAnalysis?.extracted?.bore_type === 'solid');
 
-  // Scale-normalise segment diameters against LLM-confirmed od_in.
-  // The geometry inference pipeline reads pixels off a 300-DPI image, so its
-  // scale can be 2–5× wrong.  When the LLM has a high-confidence od_in, we
-  // apply a uniform ratio so the 3-D model matches the real part size.
-  const llmOdIn: number = ed.od_in ?? 0;
-  const latheSegsNorm: Segment[] = useMemo(() => {
-    // Always scale segments to LLM od_in — LLM is the authoritative source for dimensions.
-    if (!llmOdIn || llmOdIn <= 0 || latheSegs.length === 0) return latheSegs;
-    const maxSegOd = Math.max(...latheSegs.map((s) => s.od_diameter));
-    if (!maxSegOd || maxSegOd <= 0) return latheSegs;
-    const ratio = llmOdIn / maxSegOd;
-    if (Math.abs(ratio - 1) < 0.05) return latheSegs; // already within 5% — no change
-    return latheSegs.map((s) => ({
-      ...s,
-      od_diameter: s.od_diameter * ratio,
-      id_diameter: (s.id_diameter ?? 0) * ratio,
-    }));
-  }, [latheSegs, llmOdIn]);
+  const latheSegsNorm = latheSegs;
 
   // Clean small/flagged segments that create spurious shoulders in the 3D view.
   // Merge 'short_segment' or very short span segments into neighbors to reduce visual noise.
@@ -962,6 +943,7 @@ function AutoConvertResults({
             </div>
           )}
 
+          <div style={{ color: "#9aa8b8", fontSize: 12 }}>Overall size edits preserve profile proportions. ID summary edits do not create or deepen bores; re-extract the profile to correct internal geometry.</div>
           <div className="acr-viewer-wrap">
             {isStepBacked && partSummary ? (
               <ThreeJSViewer summary={partSummary} jobId={jobId} />

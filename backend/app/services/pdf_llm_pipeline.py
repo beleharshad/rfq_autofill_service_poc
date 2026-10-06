@@ -72,6 +72,8 @@ Return ONLY a valid JSON object with these exact keys (null if genuinely not fou
   "tolerance_length": "<string or null>",
   "finish":           "<surface finish spec or null>",
   "revision":         "<string or null>",
+  "bore_type":        "<solid|through|blind|stepped|unknown>",
+  "axial_profile":    [{"z_start": 0, "z_end": "<inches>", "od_diameter": "<external diameter inches>", "id_diameter": "<internal diameter inches; 0 for solid>"}],
   "features": [
     {
       "type":        "<chamfer|groove|fillet|thread|counterbore|hole>",
@@ -195,7 +197,21 @@ id_in  (Finish ID / Primary Bore):
     max_id_in = LARGEST bore diameter (counter-bore entrance).
   For a part with main bore + orifice holes: id_in = main bore (the large one).
   It must always be LESS THAN od_in.
-  A solid shaft with no bore: id_in = null.
+  A solid shaft with no bore: id_in = null and bore_type = solid.
+  External reduced shafts are NOT bores. Concentric circles in an end view may be
+  external shoulders, not holes. Trace dimension witness lines in the side view.
+  A stacked upper/lower diameter callout is a tolerance interval on ONE surface;
+  never treat its lower limit as a second diameter or an ID. A 2X prefix repeats
+  that same surface specification at two locations; it does not establish a hole.
+  Set bore_type = unknown when internal geometry cannot be established.
+  Provide axial_profile only for a dimensioned rotational profile: list contiguous
+  intervals from z=0 to overall length, retaining EVERY external shoulder and bore
+  depth transition. Use id_diameter=0 for solid intervals, including blind-hole
+  bottoms. Use finished external diameters, never stock diameters. Preserve limit
+  tolerances separately; use the midpoint of a limit interval for preview geometry.
+  Derive a missing middle length only from a complete dimension chain. Never guess
+  shoulder positions from proportions, names, or the overall bounding cylinder.
+  If the full axial profile cannot be established, return axial_profile: [].
   ENUMERATION PROTOCOL:
     1. List EVERY bore/ID callout (all Phi or ID values inside the part).
     2. Classify each: main bore, counter-bore step, orifice/port, pilot hole.
@@ -498,6 +514,12 @@ Return ONLY the JSON object. No markdown, no explanation, no extra text."""
 
 _VALIDATOR_SYSTEM = """\
 You are a senior CNC machining QC engineer performing an independent review.
+Independently verify bore_type and axial_profile. Trace external reduced shaft
+diameters to their witness lines; concentric end-view circles alone do not prove
+a bore. Upper/lower limit values describe one surface, not separate OD and ID.
+For a solid part correct id_in to null. Check every axial shoulder, the full
+length chain, and blind-bore bottom thickness. If the profile cannot be supported,
+correct axial_profile to [] and recommend REVIEW; do not invent missing steps.
 You will receive:
   1. Raw OCR text from an engineering drawing (may be noisy, partial, or garbled).
   2. A JSON of specs extracted by Agent 1.
@@ -2341,7 +2363,9 @@ def run_pipeline(pdf_path: Path | str) -> dict[str, Any]:
       # non-fatal: do not prevent pipeline return
       pass
 
-    code_issues = _code_validate(extracted)
+    from app.services.turned_profile_validation import validate_turned_profile
+    profile_issues = validate_turned_profile(extracted)
+    code_issues = _code_validate(extracted) + profile_issues
     try:
       _name = str(extracted.get("part_name") or "").upper()
       _material = str(extracted.get("material") or "").upper()

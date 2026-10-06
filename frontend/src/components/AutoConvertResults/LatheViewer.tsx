@@ -23,6 +23,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewcube, Line, Grid } from '@react-three/drei';
 import * as THREE from 'three';
+import { profilePoints, validProfile } from './turnedProfile';
 
 // ─── Palette ───────────────────────────────────────────────────────────────────
 const BG           = '#101418';
@@ -390,7 +391,8 @@ function HoverHighlight({ dim, halfL, maxR, finishR, boreR, phiLen }: {
 }
 
 // ─── Core TurnedPart ──────────────────────────────────────────────────────────
-function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
+function TurnedPart({ segments, finishR, maxR, boreR, halfL, viewMode, features }: {
+  segments: Segment[];
   finishR: number; maxR: number; boreR: number; halfL: number;
   viewMode: ViewMode; features: Feature[];
 }) {
@@ -400,12 +402,12 @@ function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
   const xray     = viewMode === 'xray';
   const full     = viewMode === 'full';
   const phiLen   = section ? Math.PI : Math.PI * 2;
-  const hasBore  = boreR > 0.002;
+  const hasBore  = !segments.length && boreR > 0.002;
   const partLen  = halfL * 2;
 
   const shellGeo = useMemo(
-    () => buildShellGeo(finishR, maxR, boreR, halfL, isStep, stepFrac, phiLen),
-    [finishR, maxR, boreR, halfL, isStep, stepFrac, phiLen],
+    () => segments.length ? new THREE.LatheGeometry(profilePoints(segments), SEGS, 0, phiLen) : buildShellGeo(finishR, maxR, boreR, halfL, isStep, stepFrac, phiLen),
+    [segments, finishR, maxR, boreR, halfL, isStep, stepFrac, phiLen],
   );
   const capGeo = useMemo(() => {
     const inner = hasBore ? boreR : 0.001;
@@ -431,7 +433,7 @@ function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
     () => features.filter(f => f.type === 'thread'),
     [features],
   );
-  const showThread = !xray && threadFeats.length > 0;
+  const showThread = !segments.length && !xray && threadFeats.length > 0;
 
   const axisExt = partLen * 0.18;
   const axisPts: [number,number,number][] = [[0,-halfL-axisExt,0],[0,halfL+axisExt,0]];
@@ -449,10 +451,10 @@ function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
       )}
 
       {/* End faces — near face omitted in 'full' mode to expose bore opening */}
-      {!full && (
+      {!segments.length && !full && (
         <mesh geometry={capGeo} material={matFace} position={[0,-halfL,0]} rotation={[Math.PI/2,0,0]} />
       )}
-      <mesh geometry={capGeo} material={matFace} position={[0,halfL,0]} rotation={[-Math.PI/2,0,0]} />
+      {!segments.length && <mesh geometry={capGeo} material={matFace} position={[0,halfL,0]} rotation={[-Math.PI/2,0,0]} />}
 
       {/* Bore entrance accent tori */}
       {hasBore && boreEdgeGeo && <>
@@ -461,7 +463,7 @@ function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
       </>}
 
       {/* Section cut flat ring */}
-      {section && sectionCapGeo && (
+      {!segments.length && section && sectionCapGeo && (
         <mesh geometry={sectionCapGeo} material={matCut} />
       )}
 
@@ -473,16 +475,16 @@ function TurnedPart({ finishR, maxR, boreR, halfL, viewMode, features }: {
       })}
 
       {/* Groove rings from features[] */}
-      <GrooveRings features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />
+      {!segments.length && <GrooveRings features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />}
 
       {/* Chamfer edge highlights from LLM features */}
-      <ChamferBands features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />
+      {!segments.length && <ChamferBands features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />}
 
       {/* Fillet transition rings from LLM features */}
-      <FilletBands features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />
+      {!segments.length && <FilletBands features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />}
 
       {/* Cross-hole / drilled hole indicators */}
-      <CrossHoles features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />
+      {!segments.length && <CrossHoles features={features} maxR={maxR} halfL={halfL} phiLen={phiLen} />}
 
       {/* Centre-line axis dash */}
       <Line points={axisPts} color={AXIS_COLOR} lineWidth={0.8}
@@ -569,9 +571,7 @@ function Lights({ size, boreR, halfL }: { size: number; boreR: number; halfL: nu
 }
 
 // ─── Camera driver ───────────────────────────────────────────────────────────
-// Drives the camera via useFrame at priority 1, which fires AFTER OrbitControls
-// (priority 0). This means our lerp always overrides OC's spherical update,
-// guaranteeing the camera reaches the target regardless of OC damping state.
+// Animate the camera without taking ownership of the render loop.
 function CameraDriver({ pos, version }: { pos: [number,number,number]; version: number }) {
   const { camera, controls } = useThree();
   const targetRef  = useRef<[number,number,number]>(pos);
@@ -587,7 +587,7 @@ function CameraDriver({ pos, version }: { pos: [number,number,number]; version: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 
-  // priority 1 → runs after OrbitControls (priority 0) every frame
+  // Default priority keeps automatic rendering enabled.
   useFrame(() => {
     if (!movingRef.current) return;
     const [tx, ty, tz] = targetRef.current;
@@ -617,7 +617,7 @@ function CameraDriver({ pos, version }: { pos: [number,number,number]; version: 
         ctrl.enableDamping = dam;
       }
     }
-  }, 1);
+  }, 0);
 
   return null;
 }
@@ -722,11 +722,11 @@ function Btn({ label, active, onClick, title }: { label: string; active?: boolea
 export default function LatheViewer({
   segments     = [],
   jobId:       _jobId,
-  boreDiameter,
+  boreDiameter: _boreDiameter,
   features     = [],
   finishOd,
-  maxOd,
-  lengthIn,
+  maxOd: _maxOd,
+  lengthIn: _lengthIn,
 }: {
   segments?:     Segment[];
   jobId?:        string;
@@ -738,19 +738,16 @@ export default function LatheViewer({
 }) {
   const typedFeatures = features as Feature[];
   // ── Resolve dimensions ──────────────────────────────────────────────────────
-  const cleanSegs = useMemo(() => segments.filter(s =>
-    Number.isFinite(s.od_diameter) && s.od_diameter >= SEG_MIN_OD &&
-    Number.isFinite(s.z_start) && Number.isFinite(s.z_end) && s.z_end > s.z_start
-  ), [segments]);
+  const cleanSegs = useMemo(() => validProfile(segments), [segments]);
   const segMaxOd = cleanSegs.length > 0 ? Math.max(...cleanSegs.map(s => s.od_diameter)) : 0;
   const segMinOd = cleanSegs.length > 0 ? Math.min(...cleanSegs.map(s => s.od_diameter)) : 0;
   const segLen   = cleanSegs.length > 0
     ? Math.max(...cleanSegs.map(s => s.z_end)) - Math.min(...cleanSegs.map(s => s.z_start)) : 0;
 
-  const resolvedMaxOd    = (Number.isFinite(maxOd) && maxOd! > SEG_MIN_OD) ? maxOd! : segMaxOd;
+  const resolvedMaxOd = segMaxOd;
   const resolvedFinishOd = (finishOd     && finishOd     > SEG_MIN_OD) ? finishOd     : (segMinOd > SEG_MIN_OD ? segMinOd : resolvedMaxOd);
-  const resolvedBoreId   = (boreDiameter && boreDiameter > 0.01)       ? boreDiameter : 0;
-  const resolvedLen      = (Number.isFinite(lengthIn) && lengthIn! > 0.001) ? lengthIn! : segLen;
+  const resolvedBoreId = cleanSegs.length ? Math.min(...cleanSegs.map(s => s.id_diameter)) : 0;
+  const resolvedLen = segLen;
 
   const finishR  = Math.max(resolvedFinishOd / 2, 0.002);
   const maxR     = Math.max(resolvedMaxOd    / 2, finishR);
@@ -837,7 +834,7 @@ export default function LatheViewer({
             <Lights size={size} boreR={safeBoreR} halfL={halfL} />
 
             {/* ── Part geometry ── */}
-            <TurnedPart
+            <TurnedPart segments={cleanSegs}
               finishR={finishR} maxR={safeMaxR} boreR={safeBoreR}
               halfL={halfL} viewMode={viewMode} features={typedFeatures}
             />
@@ -870,8 +867,9 @@ export default function LatheViewer({
             </GizmoHelper>
           </Canvas>
 
+          <div style={{ color: "#9aa8b8", padding: 8, fontSize: 12 }}>Axial profile preview. Off-axis holes, threads, fillets and chamfers require the CAD geometry workflow.</div>
           <HUD finishOd={resolvedFinishOd} maxOd={resolvedMaxOd}
-               boreId={resolvedBoreId} lengthIn={resolvedLen} features={typedFeatures}
+               boreId={resolvedBoreId} lengthIn={resolvedLen} features={[]}
                onHover={setHoveredDim} />
           </div>{/* end canvas-area */}
 
@@ -894,7 +892,7 @@ export default function LatheViewer({
         </>
       ) : (
         <div role="status" style={{ color:'#9aa8b8', fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}>
-          3D preview unavailable: valid diameter and length are missing. Retry Auto-Detect after resolving the extraction error.
+          3D preview unavailable: a valid axial profile is missing. Retry Auto-Detect after resolving the extraction error.
         </div>
       )}
     </div>
