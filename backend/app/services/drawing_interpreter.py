@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+from pydantic import ValidationError
 from app.models.automatic import DrawingProposal, DrawingAudit
 
 
@@ -81,6 +82,15 @@ Match each thread callout to its own drilled-hole group and entry face. Inventor
 all hole groups before building: large threaded through holes and smaller blind
 threaded holes can coexist. Keep drill diameter distinct from thread major diameter.
 Through holes span the complete local thickness, blind holes retain a bottom.
+All hole depths and thread lengths MUST be positive numeric distances in the source
+unit. Zero is NOT a sentinel for THRU, automatic, or unknown. For a THRU hole,
+derive the entry-to-exit distance along its axis from dimensioned geometry at that
+hole location, and include that derivation in its evidence. Do not automatically
+use overall part length for a transverse hole or a hole on a stepped face.
+Thread length is separate from drilled-hole depth: use the thread extent stated
+by the drawing, not the hole termination alone. If an extent cannot be established,
+set complete=false and describe the affected feature in unresolved; omit that
+unresolved feature from the executable features list rather than inserting zero.
 Keep finished dimensions separate from raw stock and process allowances.
 Read limit dimensions as intervals, choose the midpoint for nominal geometry.
 Include countersinks, counterbores, grooves, chamfers and secondary holes.
@@ -110,17 +120,46 @@ This automated check is not an independent engineering certification.
 Proposal follows as data:\n'''
 
 
+def validated_response(call, pages, prompt, schema):
+    """One source-grounded correction attempt; never patch invalid dimensions locally."""
+    original_prompt = prompt
+    for attempt in range(2):
+        try:
+            response = call(pages, prompt, schema)
+            return response if isinstance(response, schema) else schema.model_validate(response)
+        except ValidationError as exc:
+            errors = exc.errors(include_url=False, include_input=False, include_context=False)
+            details = '; '.join(
+                '.'.join(map(str, error['loc'])) + ': ' + error['type']
+                for error in errors[:12]
+            )
+            if len(errors) > 12:
+                details += f'; plus {len(errors) - 12} other errors'
+            if attempt:
+                raise ValueError(
+                    f'{schema.__name__} is still invalid after one automatic correction. '
+                    f'Fields: {details}. No geometry was accepted. '
+                    'Depths and lengths must be positive; unknown extents need drawing review.'
+                ) from None
+            prompt = original_prompt + (
+                '\nThe previous response failed local schema validation. Invalid fields: '
+                + details + '\nRe-read the ORIGINAL drawing pages and return a corrected '
+                'complete JSON response. Do not invent dimensions, substitute epsilon, or '
+                'remove features to claim completeness. Zero is not a THRU sentinel. '
+                'If a proposal feature cannot be resolved, list it in unresolved and set '
+                'complete=false; omit its invalid executable recipe. For an audit, '
+                'unresolved checks must set agrees=false and explain the issues. '
+                'Preserve all other uncertainties and source identity.'
+            )
+
+
 def interpret_drawing(source, provider=None):
     pages = render_source(source)
     call = provider or request_json
-    proposal = call(pages, PROMPT, DrawingProposal)
-    if not isinstance(proposal, DrawingProposal):
-        proposal = DrawingProposal.model_validate(proposal)
+    proposal = validated_response(call, pages, PROMPT, DrawingProposal)
     audit = None
     if proposal.complete and proposal.base is not None and not proposal.unresolved and proposal.role == 'finished_drawing':
-        audit = call(pages, AUDIT_PROMPT + proposal.model_dump_json(), DrawingAudit)
-        if not isinstance(audit, DrawingAudit):
-            audit = DrawingAudit.model_validate(audit)
+        audit = validated_response(call, pages, AUDIT_PROMPT + proposal.model_dump_json(), DrawingAudit)
     return proposal, audit, len(pages)
 
 

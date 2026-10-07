@@ -200,6 +200,25 @@ def test_two_pass_vision_renders_source(tmp_path):
     assert calls==['DrawingProposal','DrawingAudit']
 
 
+def test_invalid_zero_depth_persists_review_without_accepting_geometry(tmp_path, monkeypatch):
+    from app.services import drawing_interpreter
+    calls = []
+    def provider(pages, prompt, schema):
+        calls.append(schema)
+        invalid = drawing()[0].model_dump()
+        invalid['features'][0]['depth'] = 0
+        return schema.model_validate(invalid)
+    monkeypatch.setattr(drawing_interpreter, 'request_json', provider)
+    _, path, runs, run = prepare_run(tmp_path)
+    execute(path, run['run_id'])
+    item = runs.get()['result']['items'][0]
+    assert item['status'] == 'review_required'
+    assert 'after one automatic correction' in item['issues'][0]
+    assert 'errors.pydantic.dev' not in item['issues'][0]
+    assert calls == [DrawingProposal, DrawingProposal]
+    assert not AcceptedParts(path).list()
+
+
 def test_provider_http_contract_and_secret_redaction(monkeypatch):
     import requests
     monkeypatch.setenv('GOOGLE_API_KEY','secret-never-log');calls=[]

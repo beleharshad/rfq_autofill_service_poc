@@ -32,8 +32,18 @@ The job header provides an explicit legacy profile preview switch for comparison
 `VITE_ENABLE_PART_SPEC=true` still enables the review panels for other job modes.
 
 New Auto Convert uploads send `automatic_geometry=true`; the server queues processing.
-Existing jobs have a Process uploaded sources button. Use
-`GENERIC_GEOMETRY_QUEUE_ONLY=true` with `python -m app.workers.generic_queue` for a
+Existing jobs have a **Process uploaded sources** button. Use
+**Retry automatic processing** to re-read sources after an extraction failure.
+
+Invalid proposal/audit schemas get one correction attempt against the original
+pages. Hole depths and thread lengths must be positive: zero never means THRU.
+The model must derive a through depth from dimensioned local geometry and establish
+thread extent separately, or return an incomplete proposal with unresolved reasons.
+Repeated invalid responses stop with concise field errors; no dimensions are filled
+in locally to force acceptance. A corrected complete proposal still needs the
+independent drawing audit and geometry validation.
+
+Use `GENERIC_GEOMETRY_QUEUE_ONLY=true` with `python -m app.workers.generic_queue` for a
 supervised durable dispatcher, or the API background runner for development.
 
 For the bolted-retainer case, use the original PDF in this workflow rather than
