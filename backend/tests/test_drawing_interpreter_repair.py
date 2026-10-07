@@ -109,3 +109,30 @@ def test_invalid_audit_gets_one_correction_without_replacing_proposal(proposal):
     assert result.features[1].length == .6
     assert check.dimensions[0].lower == 25.4
     assert calls == [DrawingProposal, DrawingAudit, DrawingAudit]
+
+
+def test_incomplete_finished_drawing_reports_skipped_audit_without_phantom_evidence(proposal):
+    result = DrawingProposal.model_validate({**proposal, 'base': None, 'features': [],
+        'evidence': [], 'complete': False, 'unresolved': ['Unsupported rim fillet']})
+    normalized, issues = di.normalize_proposal(result, None, 1)
+    assert normalized is None
+    assert 'Unsupported rim fillet' in issues
+    assert any('was not run' in issue for issue in issues)
+    assert not any('evidence' in issue.lower() for issue in issues)
+    assert not any('unavailable' in issue for issue in issues)
+    assert not any(issue.startswith('Source ') for issue in issues)
+
+
+def test_complete_recipe_still_requires_evidence_and_audit(proposal):
+    result = DrawingProposal.model_validate({**proposal, 'evidence': proposal['evidence'][:1]})
+    normalized, issues = di.normalize_proposal(result, None, 1)
+    assert normalized is None
+    assert 'Missing source evidence for: hole1, thread1' in issues
+    assert 'Second drawing check is unavailable' in issues
+
+
+def test_unsupported_classification_is_not_reported_as_process_drawing(proposal):
+    result = DrawingProposal.model_validate({**proposal, 'role': 'unsupported', 'complete': False})
+    _, issues = di.normalize_proposal(result, None, 1)
+    assert 'Source classification is unresolved or unsupported; confirm document role' in issues
+    assert not any('process-stage' in issue for issue in issues)
